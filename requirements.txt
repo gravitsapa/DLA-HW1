@@ -5,6 +5,7 @@ datasets
 soundfile
 numpy
 torch_audiomentations
+editdistance
 tqdm
 wget
 matplotlib

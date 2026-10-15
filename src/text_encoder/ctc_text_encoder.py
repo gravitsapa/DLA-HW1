@@ -67,7 +67,7 @@ class CTCTextEncoder:
         decoded_symbols = []
 
         for ind in inds:
-            char = self.ind2char[ind]
+            char = self.ind2char[int(ind)]
             if char != last_char and char != self.EMPTY_TOK:
                 decoded_symbols.append(char)
             last_char = char
