@@ -1,7 +1,7 @@
 defaults:
   - model: deepspeech2
   - writer: cometml
-  - metrics: example
+  - metrics: train
   - datasets: train_clear
   - dataloader: train
   - transforms: example_only_instance
@@ -16,6 +16,7 @@ lr_scheduler:
   steps_per_epoch: ${trainer.epoch_len}
   epochs: ${trainer.n_epochs}
   anneal_strategy: cos
+  cycle_momentum: false
 loss_function:
   _target_: src.loss.CTCLossWrapper
 text_encoder:
@@ -34,3 +35,4 @@ trainer:
   early_stop: ${trainer.n_epochs} # epochs for early stopping
   save_dir: "saved"
   seed: 1
+  skip_oom: false

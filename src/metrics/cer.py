@@ -36,3 +36,6 @@ class ArgmaxCERMetric(BaseMetric):
             "numerator": numerator,
             "denominator": denominator,
         }
+
+    def avg_type(self) -> str:
+        return "mean"

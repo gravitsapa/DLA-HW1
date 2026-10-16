@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from src.logger.utils import plot_spectrogram
 from src.metrics.tracker import MetricTracker
@@ -46,18 +47,22 @@ class Trainer(BaseTrainer):
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
 
-        if self.is_train:
+        loss_is_correct = bool(torch.isfinite(batch["loss"]).item())
+        batch["loss_is_correct"] = loss_is_correct
+
+        if self.is_train and loss_is_correct:
             batch["loss"].backward()  # sum of all losses is always called loss
             self._clip_grad_norm()
             self.optimizer.step()
             self.lr_scheduler.step()
 
-        # update metrics for each loss (in case of multiple losses)
-        for loss_name in self.config.writer.loss_names:
-            metrics.update(loss_name, batch[loss_name].item())
+        if loss_is_correct:
+            # update metrics for each loss (in case of multiple losses)
+            for loss_name in self.config.writer.loss_names:
+                metrics.update_mean(loss_name, batch[loss_name].item())
 
         for met in metric_funcs:
-            metrics.update(met.name, **met(**batch))
+            metrics.update_by_type(met.avg_type(), met.name, **met(**batch))
         return batch
 
     def _log_batch(self, batch_idx, batch, mode="train"):
