@@ -1,5 +1,6 @@
 import warnings
 
+import comet_ml  # we need to import comet_ml before torch
 import hydra
 import torch
 from hydra.utils import instantiate

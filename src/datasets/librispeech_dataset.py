@@ -3,6 +3,7 @@ import os
 import shutil
 from pathlib import Path
 
+import soundfile as sf
 import torchaudio
 import wget
 from tqdm import tqdm
@@ -27,8 +28,8 @@ class LibrispeechDataset(BaseDataset):
 
         if data_dir is None:
             data_dir = ROOT_PATH / "data" / "datasets" / "librispeech"
-            data_dir.mkdir(exist_ok=True, parents=True)
-        self._data_dir = data_dir
+        self._data_dir = Path(data_dir)
+        data_dir.mkdir(exist_ok=True, parents=True)
         if part == "train_all":
             index = sum(
                 [
@@ -84,8 +85,8 @@ class LibrispeechDataset(BaseDataset):
                     f_id = line.split()[0]
                     f_text = " ".join(line.split()[1:]).strip()
                     flac_path = flac_dir / f"{f_id}.flac"
-                    t_info = torchaudio.info(str(flac_path))
-                    length = t_info.num_frames / t_info.sample_rate
+                    t_info = sf.info(str(flac_path))
+                    length = t_info.frames / t_info.samplerate
                     index.append(
                         {
                             "path": str(flac_path.absolute().resolve()),

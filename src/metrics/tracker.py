@@ -1,12 +1,14 @@
 import pandas as pd
 
+from src.metrics.utils import refined_division
+
 
 class MetricTracker:
     """
     Class to aggregate metrics from many batches.
     """
 
-    def __init__(self, *keys, writer=None):
+    def __init__(self, *keys):
         """
         Args:
             *keys (list[str]): list (as positional arguments) of metric
@@ -15,18 +17,19 @@ class MetricTracker:
                 Not used in this code version. Can be used to log metrics
                 from each batch.
         """
-        self.writer = writer
-        self._data = pd.DataFrame(index=keys, columns=["total", "counts", "average"])
+
+        self._data = pd.DataFrame(
+            index=keys, columns=["numerator", "denominator", "average"], dtype=float
+        )
         self.reset()
 
     def reset(self):
         """
         Reset all metrics after epoch end.
         """
-        for col in self._data.columns:
-            self._data[col].values[:] = 0
+        self._data.loc[:, :] = 0.0
 
-    def update(self, key, value, n=1):
+    def update(self, key, numerator, denominator=1):
         """
         Update metrics DataFrame with new value.
 
@@ -35,11 +38,13 @@ class MetricTracker:
             value (float): metric value on the batch.
             n (int): how many times to count this value.
         """
-        # if self.writer is not None:
-        #     self.writer.add_scalar(key, value)
-        self._data.loc[key, "total"] += value * n
-        self._data.loc[key, "counts"] += n
-        self._data.loc[key, "average"] = self._data.total[key] / self._data.counts[key]
+
+        self._data.loc[key, "numerator"] += numerator
+        self._data.loc[key, "denominator"] += denominator
+        self._data.loc[key, "average"] = refined_division(
+            self._data.numerator[key],
+            self._data.denominator[key],
+        )
 
     def avg(self, key):
         """
@@ -69,4 +74,4 @@ class MetricTracker:
         Returns:
             metric_keys (Index): all metric names in the table.
         """
-        return self._data.total.keys()
+        return self._data.average.keys()

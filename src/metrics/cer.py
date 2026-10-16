@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 from src.metrics.base_metric import BaseMetric
-from src.metrics.utils import calc_cer
+from src.metrics.utils import calc_cer_fraction
 
 # TODO add beam search/lm versions
 # Note: they can be written in a pretty way
@@ -19,11 +19,20 @@ class ArgmaxCERMetric(BaseMetric):
     def __call__(
         self, log_probs: Tensor, log_probs_length: Tensor, text: List[str], **kwargs
     ):
-        cers = []
+        numerator = 0
+        denominator = 0
+
         predictions = torch.argmax(log_probs.cpu(), dim=-1).numpy()
         lengths = log_probs_length.detach().numpy()
         for log_prob_vec, length, target_text in zip(predictions, lengths, text):
             target_text = self.text_encoder.normalize_text(target_text)
             pred_text = self.text_encoder.ctc_decode(log_prob_vec[:length])
-            cers.append(calc_cer(target_text, pred_text))
-        return sum(cers) / len(cers)
+
+            fraction = calc_cer_fraction(target_text, pred_text)
+            numerator += fraction["numerator"]
+            denominator += fraction["denominator"]
+
+        return {
+            "numerator": numerator,
+            "denominator": denominator,
+        }
