@@ -2,6 +2,8 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import torch
+from torchvision.transforms.functional import to_pil_image
 
 
 class CometMLWriter:
@@ -176,6 +178,8 @@ class CometMLWriter:
             image (Path | Tensor | ndarray | list[tuple] | Image): image
                 in the CometML-friendly format.
         """
+        if isinstance(image, torch.Tensor):
+            image = to_pil_image(image.detach().cpu()).convert("RGB")
         self.exp.log_image(
             image_data=image, name=self._object_name(image_name), step=self.step
         )
