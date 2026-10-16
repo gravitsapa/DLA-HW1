@@ -79,25 +79,22 @@ class BaseDataset(Dataset):
                 (a single dataset element).
         """
         data_dict = self._index[ind]
-        audio_path = data_dict["path"]
-        audio = self.load_audio(audio_path)
-        text = data_dict["text"]
-        text_encoded = self.text_encoder.encode(text)
+        instance_data = {}
 
-        spectrogram = self.get_spectrogram(audio)
+        instance_data["audio_path"] = data_dict["path"]
+        instance_data["audio"] = self.load_audio(instance_data["audio_path"])
+        instance_data["text"] = data_dict["text"]
+        instance_data = self.preprocess_data(instance_data, ("audio", "text"))
 
-        instance_data = {
-            "audio": audio,
-            "spectrogram": spectrogram,
-            "text": text,
-            "text_encoded": text_encoded,
-            "audio_path": audio_path,
-        }
+        instance_data["text_encoded"] = self.text_encoder.encode(instance_data["text"])
+        instance_data["spectrogram"] = self.get_spectrogram(instance_data["audio"])
 
-        # TODO think of how to apply wave augs before calculating spectrogram
-        # Note: you may want to preserve both audio in time domain and
+        instance_data = self.preprocess_data(
+            instance_data, ("text_encoded", "spectrogram")
+        )
+
+        # TODO: you may want to preserve both audio in time domain and
         # in time-frequency domain for logging
-        instance_data = self.preprocess_data(instance_data)
 
         return instance_data
 
@@ -127,7 +124,7 @@ class BaseDataset(Dataset):
         """
         return self.instance_transforms["get_spectrogram"](audio)
 
-    def preprocess_data(self, instance_data):
+    def preprocess_data(self, instance_data, allowed_to_preprocess):
         """
         Preprocess data with instance transforms.
 
@@ -141,10 +138,16 @@ class BaseDataset(Dataset):
                 (a single dataset element) (possibly transformed via
                 instance transform).
         """
+        if isinstance(allowed_to_preprocess, str):
+            allowed_to_preprocess = (allowed_to_preprocess,)
+
         if self.instance_transforms is not None:
             for transform_name in self.instance_transforms.keys():
                 if transform_name == "get_spectrogram":
                     continue  # skip special key
+                if transform_name not in allowed_to_preprocess:
+                    continue
+
                 instance_data[transform_name] = self.instance_transforms[
                     transform_name
                 ](instance_data[transform_name])
@@ -178,7 +181,7 @@ class BaseDataset(Dataset):
             )
             _total = exceeds_audio_length.sum()
             logger.info(
-                f"{_total} ({_total / initial_size:.1%}) records are longer then "
+                f"{_total} ({_total / initial_size: .1%}) records are longer then "
                 f"{max_audio_length} seconds. Excluding them."
             )
         else:
@@ -194,7 +197,7 @@ class BaseDataset(Dataset):
             )
             _total = exceeds_text_length.sum()
             logger.info(
-                f"{_total} ({_total / initial_size:.1%}) records are longer then "
+                f"{_total} ({_total / initial_size: .1%}) records are longer then "
                 f"{max_text_length} characters. Excluding them."
             )
         else:
@@ -206,7 +209,7 @@ class BaseDataset(Dataset):
             _total = records_to_filter.sum()
             index = [el for el, exclude in zip(index, records_to_filter) if not exclude]
             logger.info(
-                f"Filtered {_total} ({_total / initial_size:.1%}) records  from dataset"
+                f"Filtered {_total} ({_total / initial_size: .1%}) records from dataset"
             )
 
         return index
