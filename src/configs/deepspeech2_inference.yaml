@@ -1,0 +1,28 @@
+defaults:
+  - model: deepspeech2
+  - metrics: inference
+  - dataloader: inference
+  - transforms: only_instance
+  - _self_
+
+datasets:
+  test:
+    _target_: src.datasets.CustomDirAudioDataset
+    audio_dir: ${dataset_dir}/audio
+    transcription_dir: ${dataset_dir}/transcriptions
+    target_sr: 16000
+    instance_transforms: ${transforms.instance_transforms.inference}
+
+dataloader:
+  batch_size: 1
+  num_workers: 0
+
+text_encoder:
+  _target_: src.text_encoder.CTCTextEncoder
+
+inferencer:
+  device_tensors: ["spectrogram"]
+  device: auto
+  save_path: "deepspeech2_predictions"
+  seed: 1
+  from_pretrained: "saved/ds2_train100_v0/model_best.pth"
