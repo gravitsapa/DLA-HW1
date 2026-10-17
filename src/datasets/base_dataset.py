@@ -81,8 +81,10 @@ class BaseDataset(Dataset):
         data_dict = self._index[ind]
         instance_data = {}
 
+        instance_data["sample_rate"] = self.target_sr
         instance_data["audio_path"] = data_dict["path"]
-        instance_data["audio"] = self.load_audio(instance_data["audio_path"])
+        instance_data["original_audio"] = self.load_audio(instance_data["audio_path"])
+        instance_data["audio"] = instance_data["original_audio"].detach().clone()
         instance_data["text"] = data_dict["text"]
         instance_data = self.preprocess_data(instance_data, ("audio", "text"))
 
@@ -92,9 +94,6 @@ class BaseDataset(Dataset):
         instance_data = self.preprocess_data(
             instance_data, ("text_encoded", "spectrogram")
         )
-
-        # TODO: you may want to preserve both audio in time domain and
-        # in time-frequency domain for logging
 
         return instance_data
 

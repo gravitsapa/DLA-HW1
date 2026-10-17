@@ -452,7 +452,7 @@ class BaseTrainer:
             mode (str): train or inference. Defines which logging
                 rules to apply.
         """
-        return NotImplementedError()
+        raise NotImplementedError()
 
     def _log_scalars(self, metric_tracker: MetricTracker):
         """

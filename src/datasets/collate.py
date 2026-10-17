@@ -23,11 +23,16 @@ def collate_fn(
     n_audio_channels = dataset_items[0]["audio"].shape[0]
     n_mel_features = dataset_items[0]["spectrogram"].shape[1]
 
+    n_original_samples_max = 0
     n_samples_max = 0
     n_mel_frames_max = 0
     n_tokens_max = 0
 
     for item in dataset_items:
+        n_audio_channels_here, n_samples_original = item["original_audio"].shape
+        assert n_audio_channels_here == n_audio_channels
+        n_original_samples_max = max(n_original_samples_max, n_samples_original)
+
         n_audio_channels_here, n_samples = item["audio"].shape
         assert n_audio_channels_here == n_audio_channels
         n_samples_max = max(n_samples_max, n_samples)
@@ -43,6 +48,8 @@ def collate_fn(
         assert n_audio_channels_here == n_audio_channels
         n_tokens_max = max(n_tokens_max, n_tokens)
 
+    original_audio_list = []
+    original_audio_length_list = []
     audio_list = []
     audio_length_list = []
     spectrogram_list = []
@@ -53,6 +60,15 @@ def collate_fn(
     audio_path_list = []
 
     for item in dataset_items:
+        original_audio = item["original_audio"]
+        if squeeze_channels:
+            original_audio = original_audio.squeeze(0)
+        original_audio_len = original_audio.shape[-1]
+        original_audio_list.append(
+            F.pad(original_audio, (0, n_original_samples_max - original_audio_len))
+        )
+        original_audio_length_list.append(original_audio_len)
+
         audio = item["audio"]
         if squeeze_channels:
             audio = audio.squeeze(0)
@@ -85,9 +101,19 @@ def collate_fn(
         text_list.append(item["text"])
         audio_path_list.append(item["audio_path"])
 
+    sample_rate = dataset_items[0]["sample_rate"]
+    assert all(item["sample_rate"] == sample_rate for item in dataset_items)
+
     batch_dim = 0
 
     return {
+        "original_audio": torch.stack(
+            original_audio_list,
+            dim=batch_dim,
+        ),
+        "original_audio_length": torch.tensor(
+            original_audio_length_list, dtype=torch.long
+        ),
         "audio": torch.stack(
             audio_list,
             dim=batch_dim,
@@ -105,4 +131,5 @@ def collate_fn(
         "text_encoded_length": torch.tensor(text_encoded_length_list, dtype=torch.long),
         "text": text_list,
         "audio_path": audio_path_list,
+        "sample_rate": sample_rate,
     }
