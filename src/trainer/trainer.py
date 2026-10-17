@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from src.logger.utils import plot_spectrogram
 from src.metrics.tracker import MetricTracker
@@ -46,18 +47,22 @@ class Trainer(BaseTrainer):
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
 
-        if self.is_train:
+        loss_is_correct = bool(torch.isfinite(batch["loss"]).item())
+        batch["loss_is_correct"] = loss_is_correct
+
+        if self.is_train and loss_is_correct:
             batch["loss"].backward()  # sum of all losses is always called loss
             self._clip_grad_norm()
             self.optimizer.step()
             self.lr_scheduler.step()
 
-        # update metrics for each loss (in case of multiple losses)
-        for loss_name in self.config.writer.loss_names:
-            metrics.update(loss_name, batch[loss_name].item())
+        if loss_is_correct:
+            # update metrics for each loss (in case of multiple losses)
+            for loss_name in self.config.writer.loss_names:
+                metrics.update_mean(loss_name, batch[loss_name].item())
 
         for met in metric_funcs:
-            metrics.update(met.name, **met(**batch))
+            metrics.update_by_type(met.avg_type(), met.name, **met(**batch))
         return batch
 
     def _log_batch(self, batch_idx, batch, mode="train"):
@@ -78,15 +83,43 @@ class Trainer(BaseTrainer):
         # logging scheme might be different for different partitions
         if mode == "train":  # the method is called only every self.log_step steps
             self.log_spectrogram(**batch)
+            self.log_original_audio(**batch)
+            self.log_augmented_audio(**batch)
         else:
             # Log Stuff
             self.log_spectrogram(**batch)
             self.log_predictions(**batch)
+            self.log_original_audio(**batch)
 
     def log_spectrogram(self, spectrogram, **batch):
         spectrogram_for_plot = spectrogram[0].detach().cpu()
         image = plot_spectrogram(spectrogram_for_plot)
         self.writer.add_image("spectrogram", image)
+
+    def log_audio(self, audio, audio_length, sample_rate, audio_path, name):
+        index = 0
+        length = int(audio_length[index].item())
+        path = Path(audio_path[index]).name
+
+        waveform = audio[index, :length].detach().cpu()
+
+        self.writer.add_audio(
+            f"({name}){path}",
+            waveform,
+            sample_rate=sample_rate,
+        )
+
+    def log_original_audio(
+        self, original_audio, original_audio_length, sample_rate, audio_path, **batch
+    ):
+        self.log_audio(
+            original_audio, original_audio_length, sample_rate, audio_path, "original"
+        )
+
+    def log_augmented_audio(
+        self, audio, audio_length, sample_rate, audio_path, **batch
+    ):
+        self.log_audio(audio, audio_length, sample_rate, audio_path, "augmented")
 
     def log_predictions(
         self, text, log_probs, log_probs_length, audio_path, examples_to_log=10, **batch

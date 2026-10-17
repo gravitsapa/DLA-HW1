@@ -248,7 +248,9 @@ class CometMLWriter:
         # log_table does not support step directly
         self.exp.log_table(
             filename=self._object_name(table_name) + ".csv",
-            tabular_data=table,
+            tabular_data=table.assign(
+                new_col=pd.Series([self.step] * table.shape[0], name="step")
+            ),
             headers=True,
         )
 

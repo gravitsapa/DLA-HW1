@@ -74,7 +74,8 @@ class Inferencer(BaseTrainer):
         self.metrics = metrics
         if self.metrics is not None:
             self.evaluation_metrics = MetricTracker(
-                *[m.name for m in self.metrics["inference"]],
+                [m.name for m in self.metrics["inference"] if m.avg_type() == "mean"],
+                [m.name for m in self.metrics["inference"] if m.avg_type() == "sum"],
             )
         else:
             self.evaluation_metrics = None
@@ -130,7 +131,7 @@ class Inferencer(BaseTrainer):
 
         if metrics is not None:
             for met in self.metrics["inference"]:
-                metrics.update(met.name, **met(**batch))
+                metrics.update_by_type(met.avg_type(), met.name, **met(**batch))
 
         # Some saving logic. This is an example
         # Use if you need to save predictions on disk

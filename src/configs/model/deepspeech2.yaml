@@ -1,0 +1,10 @@
+_target_: src.model.DeepSpeech2
+n_feats: 80
+conv_channels: 32
+conv_act_fn:
+  _target_: torch.nn.Hardtanh
+  _partial_: true
+  min_val: 0.0
+  max_val: 20.0
+n_rnn_layers: 7
+rnn_hidden_size: 4096

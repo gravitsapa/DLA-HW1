@@ -121,13 +121,17 @@ class BaseTrainer:
         # define metrics
         self.metrics = metrics
         self.train_metrics = MetricTracker(
-            *self.config.writer.loss_names,
-            "grad_norm",
-            *[m.name for m in self.metrics["train"]],
+            list(self.config.writer.loss_names)
+            + ["grad_norm"]
+            + [m.name for m in self.metrics["train"] if m.avg_type() == "mean"],
+            [m.name for m in self.metrics["train"] if m.avg_type() == "sum"],
         )
         self.evaluation_metrics = MetricTracker(
-            *self.config.writer.loss_names,
-            *[m.name for m in self.metrics["inference"]],
+            list(self.config.writer.loss_names)
+            + [m.name for m in self.metrics["inference"] if m.avg_type() == "mean"],
+            sum_keys=[
+                m.name for m in self.metrics["inference"] if m.avg_type() == "sum"
+            ],
         )
 
         # define checkpoint dir and init everything if required
@@ -200,6 +204,8 @@ class BaseTrainer:
         """
         self.is_train = True
         self.model.train()
+        if torch.device(self.device).type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
         self.train_metrics.reset()
         self.writer.set_step((epoch - 1) * self.epoch_len)
         self.writer.add_scalar("epoch", epoch)
@@ -219,7 +225,8 @@ class BaseTrainer:
                 else:
                     raise e
 
-            self.train_metrics.update("grad_norm", self._get_grad_norm())
+            if batch["loss_is_correct"]:
+                self.train_metrics.update_mean("grad_norm", self._get_grad_norm())
 
             # log current results
             if batch_idx % self.log_step == 0:
@@ -242,6 +249,8 @@ class BaseTrainer:
                 break
 
         logs = last_train_metrics
+        self.writer.set_step(epoch * self.epoch_len)
+        logs.update(self._log_peak_gpu_memory())
 
         # Run val/test
         for part, dataloader in self.evaluation_dataloaders.items():
@@ -263,6 +272,8 @@ class BaseTrainer:
         """
         self.is_train = False
         self.model.eval()
+        if torch.device(self.device).type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
         self.evaluation_metrics.reset()
         with torch.no_grad():
             for batch_idx, batch in tqdm(
@@ -280,7 +291,10 @@ class BaseTrainer:
                 batch_idx, batch, part
             )  # log only the last batch during inference
 
-        return self.evaluation_metrics.result()
+        logs = self.evaluation_metrics.result()
+        self.writer.set_step(epoch * self.epoch_len, part)
+        logs.update(self._log_peak_gpu_memory())
+        return logs
 
     def _monitor_performance(self, logs, not_improved_count):
         """
@@ -438,7 +452,7 @@ class BaseTrainer:
             mode (str): train or inference. Defines which logging
                 rules to apply.
         """
-        return NotImplementedError()
+        raise NotImplementedError()
 
     def _log_scalars(self, metric_tracker: MetricTracker):
         """
@@ -449,8 +463,16 @@ class BaseTrainer:
         """
         if self.writer is None:
             return
-        for metric_name in metric_tracker.keys():
-            self.writer.add_scalar(f"{metric_name}", metric_tracker.avg(metric_name))
+        for metric_name, metric_value in metric_tracker.result().items():
+            self.writer.add_scalar(f"{metric_name}", metric_value)
+
+    def _log_peak_gpu_memory(self):
+        if torch.device(self.device).type != "cuda":
+            return {}
+        peak_mib = torch.cuda.max_memory_allocated(self.device) / (1024**2)
+        if self.writer is not None:
+            self.writer.add_scalar("peak_gpu_memory_mib", peak_mib)
+        return {"peak_gpu_memory_mib": peak_mib}
 
     def _save_checkpoint(self, epoch, save_best=False, only_best=False):
         """
