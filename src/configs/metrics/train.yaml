@@ -5,6 +5,12 @@ train: # metrics that are calculated during training
     name: "CER_(Argmax)"
   - _target_: src.metrics.ArgmaxWERMetric
     name: "WER_(Argmax)"
+  - _target_: src.metrics.AudioPaddingRatioMetric
+    name: "audio_padding_ratio"
+  - _target_: src.metrics.SpectrogramPaddingRatioMetric
+    name: "spectrogram_padding_ratio"
+  - _target_: src.metrics.TextPaddingRatioMetric
+    name: "text_padding_ratio"
 inference: # metrics that are calculated during inference (eval)
   - _target_: src.metrics.ArgmaxCERMetric
     name: "CER_(Argmax)"
