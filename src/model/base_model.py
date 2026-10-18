@@ -11,13 +11,8 @@ class BaseModel(nn.Module, ABC):
 
     def __init__(
         self,
-        n_feats: int,
-        n_tokens: int,
     ):
         super().__init__()
-
-        self._n_feats = n_feats
-        self._n_tokens = n_tokens
 
     def __str__(self):
         """
@@ -29,9 +24,6 @@ class BaseModel(nn.Module, ABC):
         )
 
         result_info = super().__str__()
-        result_info += (
-            f"\nInput features: {self._n_feats}, output tokens: {self._n_tokens}"
-        )
         result_info += f"\nAll parameters: {all_parameters}"
         result_info += f"\nTrainable parameters: {trainable_parameters}"
 
@@ -42,6 +34,8 @@ class BaseModel(nn.Module, ABC):
         self,
         spectrogram: Tensor,
         spectrogram_length: Tensor,
+        text_encoded: Tensor,
+        text_encoded_length: Tensor,
         **batch,
     ) -> dict:
         raise NotImplementedError()

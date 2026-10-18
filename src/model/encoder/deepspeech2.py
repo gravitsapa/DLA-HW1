@@ -1,8 +1,8 @@
 import torch
 from torch import Tensor, nn
 
-from src.model.base_model import BaseModel
-from src.model.common import ModuleFabric
+from src.model.common import ModuleFactory
+from src.model.encoder.base import EncoderBase
 
 
 class ConvBlock(nn.Module):
@@ -13,7 +13,7 @@ class ConvBlock(nn.Module):
         kernels_size: tuple[int, int],
         stride: tuple[int, int],
         padding: tuple[int, int],
-        act_fn: ModuleFabric,
+        act_fn: ModuleFactory,
     ):
         super().__init__()
 
@@ -33,7 +33,7 @@ class ConvBlock(nn.Module):
         return self.block(x)
 
 
-class DeepSpeech2(BaseModel):
+class DeepSpeech2(EncoderBase):
     """
     DeepSpeech2-like model
     """
@@ -43,11 +43,11 @@ class DeepSpeech2(BaseModel):
         n_feats: int,
         n_tokens: int,
         conv_channels: int,
-        conv_act_fn: ModuleFabric,
+        conv_act_fn: ModuleFactory,
         n_rnn_layers: int,
         rnn_hidden_size: int,
     ):
-        super().__init__(n_feats, n_tokens)
+        super().__init__()
 
         if n_feats % 4 != 0:
             raise ValueError()
@@ -71,6 +71,7 @@ class DeepSpeech2(BaseModel):
 
         rnn_input_size = conv_channels * n_feats // 4
 
+        self.rnn_hidden_size = rnn_hidden_size
         self.rnn_layers = nn.GRU(
             input_size=rnn_input_size,
             hidden_size=rnn_hidden_size,
@@ -125,15 +126,15 @@ class DeepSpeech2(BaseModel):
         x = self.lookahead(x)
         # [B, RNN_HIDDEN, T / 2]
 
-        x = x.permute((0, 2, 1))
+        hidden_state = x.permute((0, 2, 1))
         # [B, T / 2, RNN_HIDDEN]
 
-        x = self.linear_head(x)  # [B, T / 2, TOKENS]
-        log_probs = nn.functional.log_softmax(x, dim=-1)
+        hidden_states_length = self.transform_input_lengths(spectrogram_length)
 
-        log_probs_length = self.transform_input_lengths(spectrogram_length)
-
-        return {"log_probs": log_probs, "log_probs_length": log_probs_length}
+        return {
+            "hidden_state": hidden_state,
+            "hidden_states_length": hidden_states_length,
+        }
 
     def transform_input_lengths(self, input_lengths):
         """
@@ -143,3 +144,7 @@ class DeepSpeech2(BaseModel):
             output_lengths (Tensor): new temporal lengths
         """
         return (input_lengths + 1) // 2
+
+    @property
+    def output_size(self) -> int:
+        return self.rnn_hidden_size
