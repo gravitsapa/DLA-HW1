@@ -34,13 +34,13 @@ class DecoderRNNT(DecoderBase):
     def _empty_result(self, hidden_state: Tensor, limit: int):
         batch_size, time_steps, _ = hidden_state.shape
         return {
-            "tokens": torch.full(
+            "tokens_predicted": torch.full(
                 (batch_size, time_steps * limit),
                 self.blank_id,
                 dtype=torch.long,
                 device=hidden_state.device,
             ),
-            "lengths": torch.zeros(
+            "lengths_predicted": torch.zeros(
                 batch_size, dtype=torch.long, device=hidden_state.device
             ),
         }
@@ -237,4 +237,7 @@ class DecoderRNNT(DecoderBase):
         )
         for index, prefix in enumerate(transcripts):
             tokens[index, : len(prefix)] = torch.tensor(prefix, dtype=torch.long)
-        return {"tokens": tokens.to(device), "lengths": lengths.to(device)}
+        return {
+            "tokens_predicted": tokens.to(device),
+            "lengths_predicted": lengths.to(device),
+        }

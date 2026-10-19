@@ -55,11 +55,11 @@ class ASR(BaseModel):
 
     def decode(
         self,
-        method: DecodeMethod,
+        decode_method: DecodeMethod,
         **kwargs,
     ) -> dict:
         return self.decoder(
-            method=method,
+            method=decode_method,
             head=self.head,
             **kwargs,
         )

@@ -10,6 +10,9 @@ class DecodeMethod(Enum):
     GREEDY = 1
     BEAM_SEARCH = 2
 
+    def __str__(self) -> str:
+        return self.name.lower()
+
 
 class DecoderBase(nn.Module):
     def __init__(self):
@@ -25,10 +28,13 @@ class DecoderBase(nn.Module):
 
     def forward(self, method: DecodeMethod, **kwargs) -> dict:
         if method == DecodeMethod.GREEDY:
-            return self.greedy_decode(**kwargs)
+            decode_data_kw = self.greedy_decode(**kwargs)
         elif method == DecodeMethod.BEAM_SEARCH:
-            return self.beam_search(**kwargs)
-        raise ValueError()
+            decode_data_kw = self.beam_search(**kwargs)
+        else:
+            raise ValueError()
+
+        return decode_data_kw
 
 
 def log_add(left: float, right: float) -> float:

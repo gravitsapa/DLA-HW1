@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import torch
 from numpy import inf
@@ -10,7 +10,7 @@ from src.metrics.tracker import MetricTracker
 from src.utils.io_utils import ROOT_PATH
 
 
-class BaseTrainer:
+class BaseTrainer(ABC):
     """
     Base class for all trainers.
     """
@@ -147,6 +147,15 @@ class BaseTrainer:
         if config.trainer.get("from_pretrained") is not None:
             self._from_pretrained(config.trainer.get("from_pretrained"))
 
+    @abstractmethod
+    def process_batch(
+        self,
+        batch: dict,
+        metrics: MetricTracker,
+        now_is_eval: bool,
+    ) -> dict:
+        raise NotImplementedError()
+
     def train(self):
         """
         Wrapper around training process to save model on keyboard interrupt.
@@ -216,6 +225,7 @@ class BaseTrainer:
                 batch = self.process_batch(
                     batch,
                     metrics=self.train_metrics,
+                    now_is_eval=False,
                 )
             except torch.cuda.OutOfMemoryError as e:
                 if self.skip_oom:
@@ -284,6 +294,7 @@ class BaseTrainer:
                 batch = self.process_batch(
                     batch,
                     metrics=self.evaluation_metrics,
+                    now_is_eval=True,
                 )
             self.writer.set_step(epoch * self.epoch_len, part)
             self._log_scalars(self.evaluation_metrics)

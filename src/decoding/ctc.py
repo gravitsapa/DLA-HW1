@@ -51,7 +51,7 @@ class DecoderCTC(DecoderBase):
         padding = torch.arange(time_steps, device=log_probs.device).unsqueeze(0)
         tokens.masked_fill_(padding >= lengths.unsqueeze(1), self.blank_id)
 
-        return {"tokens": tokens, "lengths": lengths}
+        return {"tokens_predicted": tokens, "lengths_predicted": lengths}
 
     @torch.inference_mode()
     def beam_search(
@@ -132,6 +132,6 @@ class DecoderCTC(DecoderBase):
             )
 
         return {
-            "tokens": tokens.to(device=log_probs.device),
-            "lengths": lengths.to(device=log_probs.device),
+            "tokens_predicted": tokens.to(device=log_probs.device),
+            "lengths_predicted": lengths.to(device=log_probs.device),
         }

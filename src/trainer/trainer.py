@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 
+from src.decoding.base import DecodeMethod
 from src.logger.utils import plot_spectrogram
 from src.metrics.tracker import MetricTracker
 from src.metrics.utils import calc_cer, calc_wer
@@ -14,7 +15,12 @@ class Trainer(BaseTrainer):
     Trainer class. Defines the logic of batch logging and processing.
     """
 
-    def process_batch(self, batch, metrics: MetricTracker):
+    def process_batch(
+        self,
+        batch: dict,
+        metrics: MetricTracker,
+        now_is_eval: bool,
+    ) -> dict:
         """
         Run batch through the model, compute metrics, compute loss,
         and do training step (during training stage).
@@ -43,6 +49,23 @@ class Trainer(BaseTrainer):
 
         outputs = self.model(**batch)
         batch.update(outputs)
+
+        if now_is_eval:
+            for decode_method in DecodeMethod:
+                decoded_tokens = self.model.decode(
+                    decode_method=decode_method,
+                )
+                batch.update(
+                    {
+                        f"{key}_{str(decode_method)}": val
+                        for key, val in decoded_tokens.items()
+                    }
+                )
+                prediction = self.text_encoder.decode_batch(
+                    tokens=batch["tokens_predicted"],
+                    lengths=batch["lenghts_predicted"],
+                )
+                batch[f"text_predicted_{str(decode_method)}"] = prediction
 
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
@@ -82,14 +105,13 @@ class Trainer(BaseTrainer):
 
         # logging scheme might be different for different partitions
         if mode == "train":  # the method is called only every self.log_step steps
-            self.log_spectrogram(**batch)
-            self.log_original_audio(**batch)
-            self.log_augmented_audio(**batch)
+            pass
         else:
             # Log Stuff
             self.log_spectrogram(**batch)
             self.log_predictions(**batch)
             self.log_original_audio(**batch)
+            self.log_augmented_audio(**batch)
 
     def log_spectrogram(self, spectrogram, **batch):
         spectrogram_for_plot = spectrogram[0].detach().cpu()
@@ -121,35 +143,26 @@ class Trainer(BaseTrainer):
     ):
         self.log_audio(audio, audio_length, sample_rate, audio_path, "augmented")
 
-    def log_predictions(
-        self, text, log_probs, log_probs_length, audio_path, examples_to_log=10, **batch
-    ):
-        # TODO add beam search
-        # Note: by improving text encoder and metrics design
-        # this logging can also be improved significantly
+    def log_predictions(self, text, audio_path, examples_to_log=10, **batch):
+        for decode_method in DecodeMethod:
+            texts_predicted = batch[f"text_predicted_{str(decode_method)}"]
 
-        argmax_inds = log_probs.cpu().argmax(-1).numpy()
-        argmax_inds = [
-            inds[: int(ind_len)]
-            for inds, ind_len in zip(argmax_inds, log_probs_length.numpy())
-        ]
-        argmax_texts_raw = [self.text_encoder.decode(inds) for inds in argmax_inds]
-        argmax_texts = [self.text_encoder.ctc_decode(inds) for inds in argmax_inds]
-        tuples = list(zip(argmax_texts, text, argmax_texts_raw, audio_path))
+            tuples = list(zip(texts_predicted, text, audio_path))
 
-        rows = {}
-        for pred, target, raw_pred, audio_path in tuples[:examples_to_log]:
-            target = self.text_encoder.normalize_text(target)
-            wer = calc_wer(target, pred) * 100
-            cer = calc_cer(target, pred) * 100
+            rows = {}
+            for pred, target, audio_path in tuples[:examples_to_log]:
+                target = self.text_encoder.normalize_text(target)
+                wer = calc_wer(target, pred) * 100
+                cer = calc_cer(target, pred) * 100
 
-            rows[Path(audio_path).name] = {
-                "target": target,
-                "raw prediction": raw_pred,
-                "predictions": pred,
-                "wer": wer,
-                "cer": cer,
-            }
-        self.writer.add_table(
-            "predictions", pd.DataFrame.from_dict(rows, orient="index")
-        )
+                rows[Path(audio_path).name] = {
+                    "step": self.writer.step,
+                    "method": str(decode_method),
+                    "target": target,
+                    "predictions": pred,
+                    "wer": wer,
+                    "cer": cer,
+                }
+            self.writer.add_table(
+                "predictions", pd.DataFrame.from_dict(rows, orient="index")
+            )

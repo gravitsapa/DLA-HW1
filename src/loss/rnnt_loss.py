@@ -2,24 +2,28 @@ import torch
 import torchaudio.functional as AF
 from torch import Tensor, nn
 
+from src.loss.base import LossBase
 
-class RNNTLossWrapper(nn.Module):
+
+class RNNTLossWrapper(LossBase):
     def __init__(
         self,
-        blank_token: int,
+        blank_id: int,
+        **kwargs,
     ):
         super().__init__()
 
-        self.blank_token = blank_token
+        self.blank_token = blank_id
 
     def forward(
         self,
-        logits: Tensor,
-        logits_length: Tensor,
         text_encoded: Tensor,
         text_encoded_length: Tensor,
+        *,
+        logits: Tensor,
+        logits_length: Tensor,
         **batch,
-    ):
+    ) -> dict:
         return {
             "loss": AF.rnnt_loss(
                 logits=logits,

@@ -44,19 +44,27 @@ def main(config):
     dataloaders, batch_transforms = get_dataloaders(config, text_encoder, device)
 
     # build model architecture, then print to console
-    model = instantiate(config.model, n_tokens=len(text_encoder)).to(device)
+    model = instantiate(
+        config.model,
+        n_tokens=len(text_encoder),
+        blank_id=text_encoder.blank_id,
+    ).to(device)
     logger.info(model)
 
     # get function handles of loss and metrics
-    loss_function = instantiate(config.loss_function).to(device)
+    loss_function = instantiate(
+        config.loss_function,
+        blank_id=text_encoder.blank_id,
+    ).to(device)
 
     metrics = {"train": [], "inference": []}
     for metric_type in ["train", "inference"]:
         for metric_config in config.metrics.get(metric_type, []):
             # use text_encoder in metrics
-            metrics[metric_type].append(
-                instantiate(metric_config, text_encoder=text_encoder)
-            )
+            metric = instantiate(metric_config, text_encoder=text_encoder)
+            if metric.inference_only() and metric_type != "inference":
+                raise ValueError(f"Metirc {metric.name} can only be in train mode")
+            metrics[metric_type].append(metric)
 
     # build optimizer, learning rate scheduler
     trainable_params = filter(lambda p: p.requires_grad, model.parameters())
