@@ -9,6 +9,7 @@ class LinearHead(Head):
         self,
         encoder_hidden_size: int,
         n_tokens: int,
+        **kwargs,
     ):
         super().__init__()
 
@@ -18,8 +19,8 @@ class LinearHead(Head):
         self,
         hidden_state: Tensor,
         hidden_states_length: Tensor,
-        text_encoded: Tensor,
-        text_encoded_length: Tensor,
+        text_encoded: Tensor | None = None,
+        text_encoded_length: Tensor | None = None,
     ) -> dict:
         x = self.linear(hidden_state)
         log_probs = nn.functional.log_softmax(x, dim=-1)

@@ -1,11 +1,8 @@
 from abc import ABC, abstractmethod
+from enum import Enum
 
 import torch
 from torch import Tensor, nn
-
-from src.model.common import Factoty, ModuleFactory
-from src.model.joint_network import JointNetwork
-from src.model.predictor import Predictor
 
 
 class Head(nn.Module, ABC):

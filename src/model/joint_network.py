@@ -32,10 +32,21 @@ class JointNetwork(nn.Module):
         enc_output: Tensor,
         predictor_output: Tensor,
     ):
-        enc_context = self.enc_proj(enc_output).unsqueeze(2)
-        pred_context = self.predictor_proj(predictor_output).unsqueeze(1)
+        enc_context = self.project_encoder(enc_output).unsqueeze(2)
+        pred_context = self.project_predictor(predictor_output).unsqueeze(1)
 
-        joint = self.act(enc_context + pred_context)
-        res = self.output_proj(joint)
+        return self.joint_projected(enc_context, pred_context)
 
-        return res
+    def project_encoder(self, enc_output: Tensor) -> Tensor:
+        return self.enc_proj(enc_output)
+
+    def project_predictor(self, predictor_output: Tensor) -> Tensor:
+        return self.predictor_proj(predictor_output)
+
+    def joint_projected(self, enc_context: Tensor, pred_context: Tensor) -> Tensor:
+        return self.output_proj(self.act(enc_context + pred_context))
+
+    def step(self, enc_output: Tensor, predictor_output: Tensor) -> Tensor:
+        return self.joint_projected(
+            self.project_encoder(enc_output), self.project_predictor(predictor_output)
+        )

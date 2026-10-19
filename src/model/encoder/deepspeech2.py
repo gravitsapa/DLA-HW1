@@ -90,11 +90,6 @@ class DeepSpeech2(EncoderBase):
             bias=False,
         )
 
-        self.linear_head = nn.Linear(
-            in_features=rnn_hidden_size,
-            out_features=n_tokens,
-        )
-
     def forward(
         self,
         spectrogram: Tensor,

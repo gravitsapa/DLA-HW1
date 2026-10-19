@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor, nn
 
-from src.model.common import Factoty, ModuleFactory
+from src.model.common import Factory, ModuleFactory
 from src.model.head.base import Head
 from src.model.joint_network import JointNetwork
 from src.model.predictor import Predictor
@@ -12,12 +12,15 @@ class RNNTHead(Head):
         self,
         encoder_hidden_size: int,
         n_tokens: int,
-        predictor_factory: Factoty[Predictor],
+        predictor_factory: Factory[Predictor],
+        blank_id: int,
         joint_hidden_size: int,
         joint_act_fn: ModuleFactory,
+        **kwargs,
     ):
         super().__init__()
 
+        self.blank_id = blank_id
         self.predictor = predictor_factory(n_tokens=n_tokens)
         self.joint_net = JointNetwork(
             encoder_output_dim=encoder_hidden_size,
@@ -34,9 +37,12 @@ class RNNTHead(Head):
         text_encoded: Tensor,
         text_encoded_length: Tensor,
     ) -> dict:
+        start = text_encoded.new_full((text_encoded.shape[0], 1), self.blank_id)
+        predictor_input = torch.cat((start, text_encoded), dim=1)
+        predictor_lengths = text_encoded_length + 1
         predictor_output = self.predictor(
-            text_encoded,
-            text_encoded_length,
+            predictor_input,
+            predictor_lengths,
         )
 
         logits = self.joint_net(

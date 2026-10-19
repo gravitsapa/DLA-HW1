@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 import torch
 from torch import Tensor, nn
 
+PredictorState = tuple[Tensor, Tensor]
+
 
 class Predictor(nn.Module, ABC):
     def __init__(self):
@@ -21,6 +23,12 @@ class Predictor(nn.Module, ABC):
     ) -> Tensor:
         raise NotImplementedError()
 
+    @abstractmethod
+    def step(
+        self, token: Tensor, state: PredictorState | None = None
+    ) -> tuple[Tensor, PredictorState]:
+        raise NotImplementedError()
+
 
 class PredictorLSTM(Predictor):
     def __init__(
@@ -35,10 +43,9 @@ class PredictorLSTM(Predictor):
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(n_tokens, emb_size)
-        self.lstm = nn.LSTM(emb_size, hidden_size, lstm_layers)
+        self.lstm = nn.LSTM(emb_size, hidden_size, lstm_layers, batch_first=True)
         self.norm = nn.LayerNorm(hidden_size)
 
-    @abstractmethod
     def forward(
         self,
         text_encoded: Tensor,
@@ -48,6 +55,13 @@ class PredictorLSTM(Predictor):
         output, new_state = self.lstm(embeddings, None)
         output = self.norm(output)
         return output
+
+    def step(
+        self, token: Tensor, state: PredictorState | None = None
+    ) -> tuple[Tensor, PredictorState]:
+        embeddings = self.embedding(token.unsqueeze(1))
+        output, new_state = self.lstm(embeddings, state)
+        return self.norm(output[:, 0]), new_state
 
     @property
     def output_size(self) -> int:
