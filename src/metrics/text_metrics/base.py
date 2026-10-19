@@ -49,3 +49,6 @@ class TextMetricBase(BaseMetric, ABC):
             "numerator": numerator,
             "denominator": denominator,
         }
+
+    def inference_only(self) -> bool:
+        return True

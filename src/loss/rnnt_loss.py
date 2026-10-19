@@ -24,12 +24,13 @@ class RNNTLossWrapper(LossBase):
         logits_length: Tensor,
         **batch,
     ) -> dict:
+        device = logits.device
         return {
             "loss": AF.rnnt_loss(
                 logits=logits,
-                targets=text_encoded.to(dtype=torch.int32),
-                logit_lengths=logits_length.to(dtype=torch.int32),
-                target_lengths=text_encoded_length.to(dtype=torch.int32),
+                targets=text_encoded.to(device=device, dtype=torch.int32),
+                logit_lengths=logits_length.to(device=device, dtype=torch.int32),
+                target_lengths=text_encoded_length.to(device=device, dtype=torch.int32),
                 blank=self.blank_token,
             )
         }

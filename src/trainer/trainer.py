@@ -54,6 +54,7 @@ class Trainer(BaseTrainer):
             for decode_method in DecodeMethod:
                 decoded_tokens = self.model.decode(
                     decode_method=decode_method,
+                    **batch,
                 )
                 batch.update(
                     {
@@ -62,8 +63,8 @@ class Trainer(BaseTrainer):
                     }
                 )
                 prediction = self.text_encoder.decode_batch(
-                    tokens=batch["tokens_predicted"],
-                    lengths=batch["lenghts_predicted"],
+                    tokens=decoded_tokens["tokens_predicted"],
+                    lengths=decoded_tokens["lengths_predicted"],
                 )
                 batch[f"text_predicted_{str(decode_method)}"] = prediction
 
@@ -105,13 +106,13 @@ class Trainer(BaseTrainer):
 
         # logging scheme might be different for different partitions
         if mode == "train":  # the method is called only every self.log_step steps
-            pass
+            self.log_original_audio(**batch)
+            self.log_augmented_audio(**batch)
         else:
             # Log Stuff
             self.log_spectrogram(**batch)
             self.log_predictions(**batch)
             self.log_original_audio(**batch)
-            self.log_augmented_audio(**batch)
 
     def log_spectrogram(self, spectrogram, **batch):
         spectrogram_for_plot = spectrogram[0].detach().cpu()

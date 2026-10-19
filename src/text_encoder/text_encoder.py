@@ -20,7 +20,7 @@ class TextEncoder:
 
         self.alphabet = alphabet
         self.vocab = [self.EMPTY_TOK] + list(self.alphabet)
-        self.black_id = 0
+        self.blank_id = 0
 
         self.ind2char = dict(enumerate(self.vocab))
         self.char2ind = {v: k for k, v in self.ind2char.items()}

@@ -86,8 +86,10 @@ class DecoderRNNT(DecoderBase):
             rows = active[emit]
             if rows.numel():
                 emitted = selected[emit]
-                result["tokens"][rows, result["lengths"][rows]] = emitted
-                result["lengths"][rows] += 1
+                result["tokens_predicted"][
+                    rows, result["lengths_predicted"][rows]
+                ] = emitted
+                result["lengths_predicted"][rows] += 1
                 emitted_at_frame[rows] += 1
                 previous_state = tuple(part.index_select(1, rows) for part in state)
                 prediction, next_state = head.predictor.step(emitted, previous_state)
@@ -231,7 +233,9 @@ class DecoderRNNT(DecoderBase):
                 beam = {prefix: completed[prefix] for prefix in retained}
             transcripts.append(next(iter(beam)))
 
-        tokens = torch.full(result["tokens"].shape, self.blank_id, dtype=torch.long)
+        tokens = torch.full(
+            result["tokens_predicted"].shape, self.blank_id, dtype=torch.long
+        )
         lengths = torch.tensor(
             [len(prefix) for prefix in transcripts], dtype=torch.long
         )

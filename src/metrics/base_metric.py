@@ -28,6 +28,5 @@ class BaseMetric(ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
     def inference_only(self) -> bool:
-        raise NotImplementedError()
+        return False
