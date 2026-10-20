@@ -180,6 +180,13 @@ class DecoderRNNT(DecoderBase):
                 active = beam
                 completed = {}
                 for depth in range(limit + 1):
+                    if depth == limit:
+                        for prefix, (score, prediction) in active.items():
+                            old_score = completed.get(prefix, (-math.inf, prediction))[
+                                0
+                            ]
+                            completed[prefix] = (log_add(old_score, score), prediction)
+                        break
                     prefixes = list(active)
                     contexts = torch.cat(
                         [active[prefix][1].context for prefix in prefixes]
@@ -200,8 +207,6 @@ class DecoderRNNT(DecoderBase):
                                 log_add(old_score, blank_score),
                                 prediction,
                             )
-                        if depth == limit:
-                            continue
                         for token, token_score in enumerate(frame):
                             if token == self.blank_id or token_score == -math.inf:
                                 continue
