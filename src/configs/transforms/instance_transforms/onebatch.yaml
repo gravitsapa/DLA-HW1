@@ -1,0 +1,17 @@
+# Match the raw log-mel inputs of the historical onebatch_ds2_noaug run.
+train: ${transforms.instance_transforms.inference}
+inference:
+  get_spectrogram:
+    _target_: src.transforms.spec_augs.log_mel.LogMelSpectrogram
+    sample_rate: ${sample_rate}
+    n_fft: 512
+    win_length: 400
+    hop_length: 160
+    n_mels: ${model.encoder_factory.n_feats}
+    f_min: 0.0
+    f_max: 8000.0
+    power: 2.0
+    center: true
+    mel_scale: htk
+    norm: null
+    eps: 1.0e-5

@@ -2,8 +2,8 @@ train:
   _target_: src.datasets.LibrispeechDataset
   part: "dev-clean"
   target_sr: ${sample_rate}
-  max_audio_length: 5.0
-  max_text_length: 80
+  max_audio_length: 20.0
+  max_text_length: 200
   limit: ${dataloader.batch_size}
   instance_transforms: ${transforms.instance_transforms.train}
 
@@ -11,7 +11,7 @@ val:
   _target_: src.datasets.LibrispeechDataset
   part: "dev-clean"
   target_sr: ${sample_rate}
-  max_audio_length: 5.0
-  max_text_length: 80
+  max_audio_length: 20.0
+  max_text_length: 200
   limit: ${dataloader.batch_size}
   instance_transforms: ${transforms.instance_transforms.inference}

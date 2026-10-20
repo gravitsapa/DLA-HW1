@@ -1,27 +1,25 @@
 defaults:
   - train
   - override datasets: onebatchtest
-  - override transforms/instance_transforms: no_augmentation
+  - override transforms/instance_transforms: onebatch
   - _self_
 
 experiment_name: ds2_ctc_onebatch
-model:
-  encoder_factory:
-    conv_channels: 8
-    n_rnn_layers: 2
-    rnn_hidden_size: 128
-  decoder_factory:
-    beam_size: 2
 dataloader:
   batch_size: 2
   num_workers: 0
-  pin_memory: false
-writer:
-  mode: offline
+  pin_memory: true
+optimizer:
+  lr: 3e-4
+lr_scheduler:
+  max_lr: 1e-3
+  pct_start: 0.1
+  cycle_momentum: true
 trainer:
-  n_epochs: 50
-  epoch_len: 1
-  log_step: 1
+  n_epochs: 30
+  epoch_len: 100
+  log_step: 10
   max_grad_norm: 5.0
   monitor: "min val_WER_(Greedy)"
+  save_period: 5
   override: true
