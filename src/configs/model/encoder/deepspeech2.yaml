@@ -2,6 +2,9 @@ _target_: src.model.encoder.deepspeech2.DeepSpeech2
 _partial_: true
 n_feats: 80
 conv_channels: 32
+conv1_kernel_size: [41, 11] # [frequency, time]
+conv2_kernel_size: [21, 11]
+lookahead_kernel_size: 81
 conv_act_fn:
   _target_: torch.nn.Hardtanh
   _partial_: true

@@ -1,5 +1,5 @@
 defaults:
-  - encoder@encoder_factory: deepspeech2
+  - encoder@encoder_factory: conformer
   - head@head_factory: ctc
   - decoder@decoder_factory: ctc
   - _self_
