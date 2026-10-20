@@ -1,0 +1,3 @@
+_target_: src.decoding.DecoderCTC
+_partial_: true
+beam_size: 10

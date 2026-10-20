@@ -1,17 +1,14 @@
 import math
 from abc import ABC, abstractmethod
-from enum import Enum
+from enum import StrEnum
 
 import torch
 from torch import Tensor, nn
 
 
-class DecodeMethod(Enum):
-    GREEDY = 1
-    BEAM_SEARCH = 2
-
-    def __str__(self) -> str:
-        return self.name.lower()
+class DecodeMethod(StrEnum):
+    GREEDY = "greedy"
+    BEAM_SEARCH = "beam_search"
 
 
 class DecoderBase(nn.Module):

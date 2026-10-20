@@ -1,12 +1,22 @@
 train:
   _target_: src.datasets.LibrispeechDataset
   part: "train-clean-100"
+  target_sr: ${sample_rate}
   instance_transforms: ${transforms.instance_transforms.train}
+train_eval:
+  _target_: src.datasets.LibrispeechDataset
+  part: "train-clean-100"
+  target_sr: ${sample_rate}
+  limit: 256
+  shuffle_index: true # BaseDataset uses a fixed seed for this subset.
+  instance_transforms: ${transforms.instance_transforms.inference}
 val_clean:
   _target_: src.datasets.LibrispeechDataset
   part: dev-clean
+  target_sr: ${sample_rate}
   instance_transforms: ${transforms.instance_transforms.inference}
 val_other:
   _target_: src.datasets.LibrispeechDataset
   part: dev-other
+  target_sr: ${sample_rate}
   instance_transforms: ${transforms.instance_transforms.inference}

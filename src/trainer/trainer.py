@@ -101,26 +101,22 @@ class Trainer(BaseTrainer):
             mode (str): train or inference. Defines which logging
                 rules to apply.
         """
-        # method to log data from you batch
-        # such as audio, text or images, for example
+        index = torch.randint(len(batch["audio_path"]), ()).item()
+        self.log_spectrogram(index=index, **batch)
+        self.log_original_audio(index=index, **batch)
 
-        # logging scheme might be different for different partitions
         if mode == "train":  # the method is called only every self.log_step steps
-            self.log_original_audio(**batch)
-            self.log_augmented_audio(**batch)
+            self.log_augmented_audio(index=index, **batch)
         else:
-            # Log Stuff
-            self.log_spectrogram(**batch)
             self.log_predictions(**batch)
-            self.log_original_audio(**batch)
 
-    def log_spectrogram(self, spectrogram, **batch):
-        spectrogram_for_plot = spectrogram[0].detach().cpu()
+    def log_spectrogram(self, spectrogram, spectrogram_length, index, **batch):
+        length = int(spectrogram_length[index].item())
+        spectrogram_for_plot = spectrogram[index, :, :length].detach().cpu()
         image = plot_spectrogram(spectrogram_for_plot)
         self.writer.add_image("spectrogram", image)
 
-    def log_audio(self, audio, audio_length, sample_rate, audio_path, name):
-        index = 0
+    def log_audio(self, audio, audio_length, sample_rate, audio_path, name, index):
         length = int(audio_length[index].item())
         path = Path(audio_path[index]).name
 
@@ -133,16 +129,29 @@ class Trainer(BaseTrainer):
         )
 
     def log_original_audio(
-        self, original_audio, original_audio_length, sample_rate, audio_path, **batch
+        self,
+        original_audio,
+        original_audio_length,
+        sample_rate,
+        audio_path,
+        index,
+        **batch,
     ):
         self.log_audio(
-            original_audio, original_audio_length, sample_rate, audio_path, "original"
+            original_audio,
+            original_audio_length,
+            sample_rate,
+            audio_path,
+            "original",
+            index=index,
         )
 
     def log_augmented_audio(
-        self, audio, audio_length, sample_rate, audio_path, **batch
+        self, audio, audio_length, sample_rate, audio_path, index, **batch
     ):
-        self.log_audio(audio, audio_length, sample_rate, audio_path, "augmented")
+        self.log_audio(
+            audio, audio_length, sample_rate, audio_path, "augmented", index=index
+        )
 
     def log_predictions(self, text, audio_path, examples_to_log=10, **batch):
         for decode_method in DecodeMethod:

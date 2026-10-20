@@ -11,13 +11,13 @@ from src.text_encoder.text_encoder import TextEncoder
 class TextMetricBase(BaseMetric, ABC):
     def __init__(
         self,
-        decode_method: DecodeMethod,
+        decode_method: DecodeMethod | str,
         text_encoder: TextEncoder,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
-        self.decode_method = decode_method
+        self.decode_method = DecodeMethod(decode_method)
         self.text_encoder = text_encoder
 
     @abstractmethod

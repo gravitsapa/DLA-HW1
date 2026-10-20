@@ -1,0 +1,5 @@
+_target_: src.model.predictor.PredictorLSTM
+_partial_: true
+emb_size: 256
+hidden_size: 512
+lstm_layers: 1
