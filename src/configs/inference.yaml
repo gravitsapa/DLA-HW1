@@ -1,16 +1,16 @@
 defaults:
   - model: asr
-  - metrics: inference_lm
+  - metrics: inference
   - datasets: test
   - dataloader: inference
   - transforms: train
   - override model/encoder@model.encoder_factory: conformer
   - override model/head@model.head_factory: rnnt
-  - override model/decoder@model.decoder_factory: rnnt_lm
+  - override model/decoder@model.decoder_factory: rnnt
   - override transforms/instance_transforms: no_augmentation
   - _self_
 
-experiment_name: conf_s_rnnt_test_lm
+experiment_name: conf_s_rnnt_test_lm_final
 sample_rate: 16000
 
 model:
@@ -37,8 +37,8 @@ model:
     max_cache_size: 4096
 
 dataloader:
-  batch_size: 64
-  num_workers: 6
+  batch_size: 32
+  num_workers: 8
   pin_memory: true
 
 text_encoder:
@@ -49,7 +49,7 @@ inferencer:
   device: auto
   device_tensors: [spectrogram]
   decode_methods: ${metrics.decode_methods}
-  final_decode_method: beam_search_lm # null disables saving individual transcriptions
+  final_decode_method: beam_search # null disables saving individual transcriptions
   save_dir: saved/inference
   save_predictions: true
   seed: 1

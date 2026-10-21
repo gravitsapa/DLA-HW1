@@ -1,3 +1,4 @@
+import gc
 from pathlib import Path
 
 import pandas as pd
@@ -211,6 +212,12 @@ class Inferencer(BaseTrainer):
 
                 if has_ground_truth:
                     true_texts += batch["text"]
+
+                del batch
+                gc.collect()
+                if torch.device(self.device).type == "cuda":
+                    with torch.cuda.device(self.device):
+                        torch.cuda.empty_cache()
 
         if self.save_path is not None:
             save_path = self.save_path / part / "predictions.csv"
