@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+from tqdm.auto import tqdm
 
-from src.decoding.base import DecodeMethod
 from src.logger.utils import plot_spectrogram
 from src.metrics.tracker import MetricTracker
 from src.metrics.utils import calc_cer, calc_wer
@@ -14,6 +14,157 @@ class Trainer(BaseTrainer):
     """
     Trainer class. Defines the logic of batch logging and processing.
     """
+
+    def train(self):
+        """
+        Wrapper around training process to save model on keyboard interrupt.
+        """
+        try:
+            self._train_process()
+        except KeyboardInterrupt as e:
+            self.logger.info("Saving model on keyboard interrupt")
+            self._save_checkpoint(self._last_epoch, save_best=False)
+            raise e
+
+    def _train_process(self):
+        """
+        Full training logic:
+
+        Training model for an epoch, evaluating it on non-train partitions,
+        and monitoring the performance improvement (for early stopping
+        and saving the best checkpoint).
+        """
+        not_improved_count = 0
+        for epoch in range(self.start_epoch, self.epochs + 1):
+            self._last_epoch = epoch
+            result = self._train_epoch(epoch)
+
+            # save logged information into logs dict
+            logs = {"epoch": epoch}
+            logs.update(result)
+
+            # print logged information to the screen
+            for key, value in logs.items():
+                self.logger.info(f"    {key:15s}: {value}")
+
+            # evaluate model performance according to configured metric,
+            # save best checkpoint as model_best
+            best, stop_process, not_improved_count = self._monitor_performance(
+                logs, not_improved_count
+            )
+
+            if epoch % self.save_period == 0 or best:
+                self._save_checkpoint(epoch, save_best=best, only_best=True)
+
+            if stop_process:  # early_stop
+                break
+
+    def _train_epoch(self, epoch):
+        """
+        Training logic for an epoch, including logging and evaluation on
+        non-train partitions.
+
+        Args:
+            epoch (int): current training epoch.
+        Returns:
+            logs (dict): logs that contain the average loss and metric in
+                this epoch.
+        """
+        self.is_train = True
+        self.model.train()
+        if torch.device(self.device).type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
+        self.train_metrics.reset()
+        self.writer.set_step((epoch - 1) * self.epoch_len)
+        self.writer.add_scalar("epoch", epoch)
+        for batch_idx, batch in enumerate(
+            tqdm(self.train_dataloader, desc="train", total=self.epoch_len)
+        ):
+            try:
+                batch = self.process_batch(
+                    batch,
+                    metrics=self.train_metrics,
+                    now_is_eval=False,
+                )
+            except torch.cuda.OutOfMemoryError as e:
+                if self.skip_oom:
+                    self.logger.warning("OOM on batch. Skipping batch.")
+                    torch.cuda.empty_cache()  # free some memory
+                    continue
+                else:
+                    raise e
+
+            if batch["loss_is_correct"]:
+                self.train_metrics.update_mean("grad_norm", self._get_grad_norm())
+
+            # log current results
+            if batch_idx % self.log_step == 0:
+                self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
+                self.logger.debug(
+                    "Train Epoch: {} {} Loss: {:.6f}".format(
+                        epoch, self._progress(batch_idx), batch["loss"].item()
+                    )
+                )
+                self.writer.add_scalar(
+                    "learning rate", self.lr_scheduler.get_last_lr()[0]
+                )
+                self._log_scalars(self.train_metrics)
+                self._log_batch(batch_idx, batch)
+                # we don't want to reset train metrics at the start of every epoch
+                # because we are interested in recent train metrics
+                last_train_metrics = self.train_metrics.result()
+                self.train_metrics.reset()
+            if batch_idx + 1 >= self.epoch_len:
+                break
+
+        logs = last_train_metrics
+        self.writer.set_step(epoch * self.epoch_len)
+        logs.update(self._log_peak_gpu_memory())
+
+        # Run val/test
+        for part, dataloader in self.evaluation_dataloaders.items():
+            val_logs = self._evaluation_epoch(epoch, part, dataloader)
+            logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+
+        return logs
+
+    def _evaluation_epoch(self, epoch, part, dataloader):
+        """
+        Evaluate model on the partition after training for an epoch.
+
+        Args:
+            epoch (int): current training epoch.
+            part (str): partition to evaluate on
+            dataloader (DataLoader): dataloader for the partition.
+        Returns:
+            logs (dict): logs that contain the information about evaluation.
+        """
+        self.is_train = False
+        self.model.eval()
+        if torch.device(self.device).type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
+        self.evaluation_metrics.reset()
+        with torch.no_grad():
+            for batch_idx, batch in tqdm(
+                enumerate(dataloader),
+                desc=part,
+                total=len(dataloader),
+            ):
+                batch = self.process_batch(
+                    batch,
+                    metrics=self.evaluation_metrics,
+                    now_is_eval=True,
+                )
+            self.writer.set_step(epoch * self.epoch_len, part)
+            self._log_scalars(self.evaluation_metrics)
+            self._log_batch(
+                batch_idx, batch, part
+            )  # log only the last batch during inference
+
+        logs = self.evaluation_metrics.result()
+        self.writer.set_step(epoch * self.epoch_len, part)
+        logs.update(self._log_peak_gpu_memory())
+        return logs
 
     def process_batch(
         self,
@@ -51,22 +202,7 @@ class Trainer(BaseTrainer):
         batch.update(outputs)
 
         if now_is_eval:
-            for decode_method in DecodeMethod:
-                decoded_tokens = self.model.decode(
-                    decode_method=decode_method,
-                    **batch,
-                )
-                batch.update(
-                    {
-                        f"{key}_{str(decode_method)}": val
-                        for key, val in decoded_tokens.items()
-                    }
-                )
-                prediction = self.text_encoder.decode_batch(
-                    tokens=decoded_tokens["tokens_predicted"],
-                    lengths=decoded_tokens["lengths_predicted"],
-                )
-                batch[f"text_predicted_{str(decode_method)}"] = prediction
+            batch = self.decode_batch(batch)
 
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
@@ -154,7 +290,9 @@ class Trainer(BaseTrainer):
         )
 
     def log_predictions(self, text, audio_path, examples_to_log=10, **batch):
-        for decode_method in DecodeMethod:
+        for decode_method in self.decode_methods:
+            if f"text_predicted_{str(decode_method)}" not in batch:
+                continue
             texts_predicted = batch[f"text_predicted_{str(decode_method)}"]
 
             tuples = list(zip(texts_predicted, text, audio_path))

@@ -24,7 +24,7 @@ class DecoderRNNT(DecoderBase):
         max_cache_size: int = 4096,
         **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
 
         self.blank_id = blank_id
         self.beam_size = beam_size
@@ -151,6 +151,7 @@ class DecoderRNNT(DecoderBase):
         hidden_states_length: Tensor,
         head: "RNNTHead",
         max_symbols_per_step: int | None = None,
+        _use_lm: bool = False,
         **kwargs,
     ) -> dict:
         width = self.beam_size if beam_size is None else beam_size
@@ -161,6 +162,7 @@ class DecoderRNNT(DecoderBase):
         )
 
         result = self._empty_result(hidden_state, limit)
+        use_lm = _use_lm and self.lm_weight != 0
 
         device = hidden_state.device
         input_length = hidden_states_length.to(device)
@@ -195,8 +197,15 @@ class DecoderRNNT(DecoderBase):
                         enc_context[batch_index, time].unsqueeze(0), contexts
                     )
                     probabilities = logits.float().log_softmax(-1).cpu().tolist()
+                    lm_scores = (
+                        self._lm_scores(prefixes, device, logits.shape[-1])
+                        if use_lm
+                        else [None] * len(prefixes)
+                    )
                     candidates = {}
-                    for prefix, frame in zip(prefixes, probabilities):
+                    for prefix, frame, lm_row in zip(
+                        prefixes, probabilities, lm_scores
+                    ):
                         score, prediction = active[prefix]
                         blank_score = score + frame[self.blank_id]
                         if blank_score != -math.inf:
@@ -210,6 +219,8 @@ class DecoderRNNT(DecoderBase):
                         for token, token_score in enumerate(frame):
                             if token == self.blank_id or token_score == -math.inf:
                                 continue
+                            if use_lm:
+                                token_score += self.lm_weight * lm_row[token]
                             extension = prefix + (token,)
                             candidates[extension] = (score + token_score, prediction)
 

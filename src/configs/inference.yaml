@@ -1,0 +1,62 @@
+defaults:
+  - model: asr
+  - metrics: inference
+  - datasets: test
+  - dataloader: inference
+  - transforms: train
+  - override model/encoder@model.encoder_factory: conformer
+  - override model/head@model.head_factory: rnnt
+  - override model/decoder@model.decoder_factory: rnnt
+  - override transforms/instance_transforms: no_augmentation
+  - _self_
+
+experiment_name: conf_s_rnnt_epoch13_test
+sample_rate: 16000
+
+model:
+  encoder_factory:
+    n_feats: 80
+    model_dim: 144
+    n_layers: 16
+    n_heads: 4
+    ff_expansion_factor: 4
+    conv_kernel_size: 32
+    dropout: 0.1
+    attention_dropout: 0.1
+    subsampling_channels: 144
+  head_factory:
+    predictor_factory:
+      emb_size: 256
+      hidden_size: 512
+      lstm_layers: 1
+    joint_hidden_size: 512
+  decoder_factory:
+    lm: null
+    beam_size: 32
+    max_symbols_per_step: 5
+    max_cache_size: 4096
+
+dataloader:
+  batch_size: 32
+  num_workers: 6
+  pin_memory: true
+
+text_encoder:
+  _target_: src.text_encoder.TextEncoder
+
+inferencer:
+  from_pretrained: saved/conf_s_rnnt_train360_a6000_20ep_test_v6/checkpoint-epoch13-106496.pth
+  device: auto
+  device_tensors: [spectrogram]
+  decode_methods: ${metrics.decode_methods}
+  final_decode_method: beam_search # null disables saving individual transcriptions
+  save_dir: saved/inference
+  save_predictions: true
+  seed: 1
+
+hydra:
+  job:
+    chdir: false
+    env_set:
+      TORCH_CUDNN_V8_API_DISABLED: "1"
+      TORCH_ALLOW_TF32_CUBLAS_OVERRIDE: "1"

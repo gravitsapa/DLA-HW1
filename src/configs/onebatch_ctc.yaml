@@ -12,14 +12,14 @@ dataloader:
 optimizer:
   lr: 3e-4
 lr_scheduler:
-  max_lr: 1e-3
+  max_lr: 6e-4
   pct_start: 0.1
   cycle_momentum: true
 trainer:
   n_epochs: 30
   epoch_len: 100
   log_step: 10
-  max_grad_norm: 5.0
+  max_grad_norm: 400.0
   monitor: "min val_WER_(Greedy)"
   save_period: 5
   override: true

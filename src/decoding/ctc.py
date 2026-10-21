@@ -14,7 +14,7 @@ class DecoderCTC(DecoderBase):
         beam_size: int = 10,
         **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
 
         self.blank_id = blank_id
         self.beam_size = beam_size
@@ -61,6 +61,7 @@ class DecoderCTC(DecoderBase):
         head: LinearHead,
         hidden_state: Tensor,
         hidden_states_length: Tensor,
+        _use_lm: bool = False,
         **kwargs,
     ) -> dict:
         output = head(
@@ -79,12 +80,20 @@ class DecoderCTC(DecoderBase):
         tokens = torch.full((batch_size, time_steps), self.blank_id, dtype=torch.long)
         lengths = torch.zeros(batch_size, dtype=torch.long)
         negative_inf = -math.inf
+        use_lm = _use_lm and self.lm_weight != 0
 
         for batch_idx, length in enumerate(input_lengths):
             beam = {(): (0.0, negative_inf)}
             for frame in probabilities[batch_idx, : int(length)].tolist():
                 next_beam = {}
-                for prefix, (p_blank, p_nonblank) in beam.items():
+                lm_scores = (
+                    self._lm_scores(list(beam), log_probs.device, n_tokens)
+                    if use_lm
+                    else [None] * len(beam)
+                )
+                for (prefix, (p_blank, p_nonblank)), lm_row in zip(
+                    beam.items(), lm_scores
+                ):
                     total = log_add(p_blank, p_nonblank)
                     old_blank, old_nonblank = next_beam.get(
                         prefix, (negative_inf, negative_inf)
@@ -109,6 +118,8 @@ class DecoderCTC(DecoderBase):
 
                         if extension_prob == negative_inf:
                             continue
+                        if use_lm:
+                            extension_prob += self.lm_weight * lm_row[token]
                         extension = prefix + (token,)
                         old_blank, old_nonblank = next_beam.get(
                             extension, (negative_inf, negative_inf)

@@ -50,3 +50,6 @@ class CommonVoiceDataset(BaseDataset):
             with index_path.open("w") as f:
                 json.dump(index, f, indent=2)
         return index
+
+    def has_ground_truth(self) -> bool:
+        return True

@@ -1,3 +1,5 @@
+decode_methods: [greedy, beam_search]
+
 train: # metrics that are calculated during training
   - _target_: src.metrics.IncorrectLosses
     name: "Incorrect_losses_count"

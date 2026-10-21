@@ -20,6 +20,12 @@ def collate_fn(
     if len(dataset_items) == 0:
         return {}
 
+    has_ground_truth = "text" in dataset_items[0]
+    if any(("text" in item) != has_ground_truth for item in dataset_items):
+        raise ValueError(
+            "cannot mix recordings with and without references in one batch"
+        )
+
     n_audio_channels = dataset_items[0]["audio"].shape[0]
     n_mel_features = dataset_items[0]["spectrogram"].shape[1]
 
@@ -44,9 +50,10 @@ def collate_fn(
         assert n_mel_features == n_mel_features_here
         n_mel_frames_max = max(n_mel_frames_max, n_mel_frames)
 
-        n_audio_channels_here, n_tokens = item["text_encoded"].shape
-        assert n_audio_channels_here == n_audio_channels
-        n_tokens_max = max(n_tokens_max, n_tokens)
+        if has_ground_truth:
+            n_audio_channels_here, n_tokens = item["text_encoded"].shape
+            assert n_audio_channels_here == n_audio_channels
+            n_tokens_max = max(n_tokens_max, n_tokens)
 
     original_audio_list = []
     original_audio_length_list = []
@@ -85,20 +92,21 @@ def collate_fn(
         )
         spectrogram_length_list.append(spectrogram_len)
 
-        text_encoded = item["text_encoded"]
-        if squeeze_channels:
-            text_encoded = text_encoded.squeeze(0)
-        text_encoded_len = text_encoded.shape[-1]
-        text_encoded_list.append(
-            F.pad(
-                text_encoded,
-                (0, n_tokens_max - text_encoded_len),
-                value=text_pad_token,
+        if has_ground_truth:
+            text_encoded = item["text_encoded"]
+            if squeeze_channels:
+                text_encoded = text_encoded.squeeze(0)
+            text_encoded_len = text_encoded.shape[-1]
+            text_encoded_list.append(
+                F.pad(
+                    text_encoded,
+                    (0, n_tokens_max - text_encoded_len),
+                    value=text_pad_token,
+                )
             )
-        )
-        text_encoded_length_list.append(text_encoded_len)
+            text_encoded_length_list.append(text_encoded_len)
 
-        text_list.append(item["text"])
+            text_list.append(item["text"])
         audio_path_list.append(item["audio_path"])
 
     sample_rate = dataset_items[0]["sample_rate"]
@@ -106,7 +114,7 @@ def collate_fn(
 
     batch_dim = 0
 
-    return {
+    batch = {
         "original_audio": torch.stack(
             original_audio_list,
             dim=batch_dim,
@@ -124,12 +132,17 @@ def collate_fn(
             dim=batch_dim,
         ),
         "spectrogram_length": torch.tensor(spectrogram_length_list, dtype=torch.long),
-        "text_encoded": torch.stack(
-            text_encoded_list,
-            dim=batch_dim,
-        ),
-        "text_encoded_length": torch.tensor(text_encoded_length_list, dtype=torch.long),
-        "text": text_list,
         "audio_path": audio_path_list,
         "sample_rate": sample_rate,
     }
+    if has_ground_truth:
+        batch.update(
+            {
+                "text_encoded": torch.stack(text_encoded_list, dim=batch_dim),
+                "text_encoded_length": torch.tensor(
+                    text_encoded_length_list, dtype=torch.long
+                ),
+                "text": text_list,
+            }
+        )
+    return batch

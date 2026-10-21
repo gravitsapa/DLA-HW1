@@ -1,0 +1,25 @@
+defaults:
+  - train
+  - _self_
+
+decode_methods: [greedy, beam_search, beam_search_lm]
+
+inference:
+  - _target_: src.metrics.CERMetric
+    decode_method: greedy
+    name: "CER_(Greedy)"
+  - _target_: src.metrics.WERMetric
+    decode_method: greedy
+    name: "WER_(Greedy)"
+  - _target_: src.metrics.CERMetric
+    decode_method: beam_search
+    name: "CER_(Beam_search)"
+  - _target_: src.metrics.WERMetric
+    decode_method: beam_search
+    name: "WER_(Beam_search)"
+  - _target_: src.metrics.CERMetric
+    decode_method: beam_search_lm
+    name: "CER_(Beam_search_LM)"
+  - _target_: src.metrics.WERMetric
+    decode_method: beam_search_lm
+    name: "WER_(Beam_search_LM)"

@@ -31,6 +31,7 @@ class ASR(BaseModel):
         self,
         spectrogram: Tensor,
         spectrogram_length: Tensor,
+        **batch,
     ) -> dict:
         encoder_hidden = self.encoder(spectrogram, spectrogram_length)
         return encoder_hidden

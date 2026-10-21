@@ -3,3 +3,5 @@ _partial_: true
 beam_size: 10
 max_symbols_per_step: 5
 max_cache_size: 4096
+lm: null
+lm_weight: 0.05
