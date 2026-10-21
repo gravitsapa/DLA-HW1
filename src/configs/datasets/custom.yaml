@@ -1,0 +1,8 @@
+custom:
+  _target_: src.datasets.CustomDirAudioDataset
+  audio_dir: ${custom_dataset_dir}/audio
+  # Set to the reference directory to enable CER/WER during inference.
+  transcription_dir: null
+  target_sr: ${sample_rate}
+  limit: null
+  instance_transforms: ${transforms.instance_transforms.inference}

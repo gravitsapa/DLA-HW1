@@ -7,20 +7,23 @@ from src.metrics.utils import calc_cer_fraction, calc_wer_fraction, refined_divi
 from src.text_encoder import TextEncoder
 
 
-def transcription_files(dir):
-    dir = Path(dir)
-
-    return {path.stem: path for path in dir.glob("*.txt") if path.is_file()}
+def transcription_files(directory):
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise ValueError(f"wrong transcription directory: {directory}")
+    return {path.stem: path for path in directory.glob("*.txt") if path.is_file()}
 
 
 def calc_metrics(ground_truth_dir, predictions_dir):
     references = transcription_files(ground_truth_dir)
     predictions = transcription_files(predictions_dir)
+    if not references:
+        raise ValueError(f"no .txt files found in {ground_truth_dir}")
 
     missing = sorted(references.keys() - predictions.keys())
     extra = sorted(predictions.keys() - references.keys())
     if missing or extra:
-        raise ValueError()
+        raise ValueError("ids do not match")
 
     totals = {"CER": [0, 0], "WER": [0, 0]}
     for utterance_id in sorted(references):
@@ -61,6 +64,7 @@ def main():
         if args.dataset_dir is not None
         else args.ground_truth_dir
     )
+
     result = calc_metrics(ground_truth_dir, args.predictions_dir)
 
     serialized = json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)

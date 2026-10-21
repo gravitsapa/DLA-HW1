@@ -13,6 +13,7 @@ pedalboard==0.9.26
 editdistance==0.8.1
 tqdm==4.70.1
 wget==3.2
+gdown==6.4.2
 matplotlib==3.11.2
 pandas==3.0.6
 Pillow==12.3.0

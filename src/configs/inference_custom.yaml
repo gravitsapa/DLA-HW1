@@ -1,0 +1,11 @@
+defaults:
+  - inference
+  - override datasets: custom
+  - _self_
+
+custom_dataset_dir: data/custom
+experiment_name: conf_s_rnnt_custom
+
+dataloader:
+  batch_size: 2
+  num_workers: 0
