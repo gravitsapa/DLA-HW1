@@ -1,13 +1,13 @@
-test_clean:
+test_other:
   _target_: src.datasets.LibrispeechDataset
-  part: test-clean
+  part: test-other
   target_sr: ${sample_rate}
   limit: null
   instance_transforms: ${transforms.instance_transforms.inference}
 
-test_other:
+test_clean:
   _target_: src.datasets.LibrispeechDataset
-  part: test-other
+  part: test-clean
   target_sr: ${sample_rate}
   limit: null
   instance_transforms: ${transforms.instance_transforms.inference}

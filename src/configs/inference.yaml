@@ -32,12 +32,12 @@ model:
     joint_hidden_size: 512
   decoder_factory:
     lm_weight: 0.5
-    beam_size: 32
+    beam_size: 10
     max_symbols_per_step: 5
     max_cache_size: 4096
 
 dataloader:
-  batch_size: 32
+  batch_size: 64
   num_workers: 6
   pin_memory: true
 
@@ -45,7 +45,7 @@ text_encoder:
   _target_: src.text_encoder.TextEncoder
 
 inferencer:
-  from_pretrained: data/checkpoint.pth
+  from_pretrained: saved/model.pth
   device: auto
   device_tensors: [spectrogram]
   decode_methods: ${metrics.decode_methods}
