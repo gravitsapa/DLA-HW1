@@ -76,8 +76,6 @@ class FlairCharLM:
     def batch_step(self, states: list[RNN_STATE], tokens: list[int]) -> list[LM_STATE]:
         if not tokens:
             return []
-        for token in tokens:
-            self._validate_token(token)
         inputs = torch.tensor(
             [[self.id_to_lm_token[token] for token in tokens]],
             dtype=torch.long,

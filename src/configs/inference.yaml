@@ -1,16 +1,16 @@
 defaults:
   - model: asr
-  - metrics: inference
+  - metrics: inference_lm
   - datasets: test
   - dataloader: inference
   - transforms: train
   - override model/encoder@model.encoder_factory: conformer
   - override model/head@model.head_factory: rnnt
-  - override model/decoder@model.decoder_factory: rnnt
+  - override model/decoder@model.decoder_factory: rnnt_lm
   - override transforms/instance_transforms: no_augmentation
   - _self_
 
-experiment_name: conf_s_rnnt_test
+experiment_name: conf_s_rnnt_test_lm_flair
 sample_rate: 16000
 
 model:
@@ -31,13 +31,13 @@ model:
       lstm_layers: 1
     joint_hidden_size: 512
   decoder_factory:
-    lm_weight: 0.5
+    lm_weight: 0.175
     beam_size: 10
     max_symbols_per_step: 5
     max_cache_size: 4096
 
 dataloader:
-  batch_size: 32
+  batch_size: 16
   num_workers: 8
   pin_memory: true
 
@@ -46,10 +46,10 @@ text_encoder:
 
 inferencer:
   from_pretrained: saved/model.pth
-  device: auto
+  device: cuda
   device_tensors: [spectrogram]
   decode_methods: ${metrics.decode_methods}
-  final_decode_method: beam_search # null disables saving individual transcriptions
+  final_decode_method: beam_search_lm # null disables saving individual transcriptions
   save_dir: saved/inference
   save_predictions: true
   seed: 1
