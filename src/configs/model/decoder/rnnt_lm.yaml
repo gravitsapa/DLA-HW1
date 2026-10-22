@@ -3,12 +3,7 @@ defaults:
   - _self_
 
 lm:
-  _target_: src.decoding.lm.NoTokenLM
-  repo_id: omurberaisik/NoTokenLM-Gen-3.5
-  revision: 0dda19f7b518eda876fe62b1b9c58685bc9742a9
-  cache_dir: null
-  local_files_only: false
-  space_id: 32 # Byte ID in the LM vocabulary
-  device: null
-  batch_size: 16
-  use_cuda_graphs: true
+  _target_: src.decoding.lm.FlairCharLM
+  text_encoder: ${text_encoder}
+  model_name: news-forward-fast
+  device: ${oc.select:inferencer.device,${oc.select:trainer.device,auto}}

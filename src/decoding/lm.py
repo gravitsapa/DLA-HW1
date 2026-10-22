@@ -1,121 +1,70 @@
-from contextlib import nullcontext
-from string import ascii_lowercase
-
 import torch
+from torch import Tensor
+
+from src.text_encoder import TextEncoder
+
+RNN_STATE = tuple[Tensor, Tensor]
+LM_STATE = tuple[Tensor, RNN_STATE]
 
 
-class NoTokenLM:
+class FlairCharLM:
+    """Character LM with explicit LSTM states.
+
+    Scores are normalized over the non-blank ASR vocabulary.
+    """
+
     def __init__(
         self,
-        repo_id="omurberaisik/NoTokenLM-Gen-3.5",
-        revision="0dda19f7b518eda876fe62b1b9c58685bc9742a9",
-        cache_dir=None,
-        local_files_only=False,
-        vocabulary=None,
-        blank_id=0,
-        space_id=ord(" "),
-        device=None,
-        batch_size=16,
-        use_cuda_graphs=True,
+        text_encoder: TextEncoder,
+        model_name: str = "news-forward-fast",
+        device: str | torch.device = "auto",
     ):
-        from transformers import AutoModelForCausalLM
+        from flair.embeddings import FlairEmbeddings
 
-        self.vocabulary = (
-            list(vocabulary)
-            if vocabulary is not None
-            else [""] + list(ascii_lowercase + " ")
+        self.device = torch.device(
+            ("cuda" if torch.cuda.is_available() else "cpu")
+            if device == "auto"
+            else device
         )
-        self.blank_id = blank_id
-        self.space_id = space_id
-
-        self.token_ids = [
-            0 if i == blank_id else ord(char) for i, char in enumerate(self.vocabulary)
-        ]
-        self.model = (
-            AutoModelForCausalLM.from_pretrained(
-                repo_id,
-                revision=revision,
-                cache_dir=cache_dir,
-                local_files_only=local_files_only,
-                trust_remote_code=True,
+        self.model = FlairEmbeddings(model_name, has_decoder=True).lm
+        self.model.to(self.device)
+        self.model.requires_grad_(False)
+        self.model.eval()
+        if not self.model.is_forward_lm or self.model.decoder is None:
+            raise ValueError(
+                "A forward character LM with a prediction head is required"
             )
-            .float()
-            .requires_grad_(False)
-            .eval()
-        )
 
-        self.context_size = self.model.config.block_size
-        self.device = device
-        self.batch_size = batch_size
-        self.use_cuda_graphs = use_cuda_graphs
-        self._model_device = next(self.model.parameters()).device
-        self._graphs = {}
-        self._scores = {}
+        self.blank_id = text_encoder.blank_id
+        dictionary = self.model.dictionary
+        characters = set(dictionary.get_items())
+        missing = [
+            char
+            for i, char in enumerate(text_encoder.vocab)
+            if i != self.blank_id and char not in characters
+        ]
+        if missing:
+            raise ValueError(f"Characters missing from the LM vocabulary: {missing}")
+        self.id_to_lm_token = [
+            dictionary.get_idx_for_item(char) if i != self.blank_id else 0
+            for i, char in enumerate(text_encoder.vocab)
+        ]
 
-    def clear_cache(self):
-        self._scores.clear()
-
-    def _graph_logits(self, rows, target):
-        batch = min(self.batch_size, 1 << (len(rows) - 1).bit_length())
-        length = min(
-            self.context_size, 1 << max(3, (max(map(len, rows)) - 1).bit_length())
-        )
-        key = (batch, length)
-        if key not in self._graphs:
-            inputs = torch.zeros(batch, length, dtype=torch.long, device=target)
-            graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
-                logits = self.model(input_ids=inputs).logits
-            self._graphs[key] = (inputs, graph, logits)
-
-        inputs, graph, logits = self._graphs[key]
-        packed = torch.nn.utils.rnn.pad_sequence(
-            [torch.tensor(row, dtype=torch.long) for row in rows], batch_first=True
-        )
-        inputs.zero_()
-        inputs[: len(rows), : packed.shape[1]].copy_(packed)
-        graph.replay()
-        return logits
+    def _forward(self, tokens: list[int], state: RNN_STATE) -> LM_STATE:
+        inputs = torch.tensor(tokens, dtype=torch.long, device=self.device).unsqueeze(1)
+        logits, _, next_state = self.model(inputs, state)
+        scores = logits[-1, 0, self.id_to_lm_token]
+        scores[self.blank_id] = -torch.inf
+        return scores.log_softmax(-1).cpu(), next_state
 
     @torch.inference_mode()
-    def score_prefixes(self, prefixes, *, device):
-        target = torch.device(self.device or device)
-        if target.type == "cuda" and target.index is None:
-            target = torch.device("cuda", torch.cuda.current_device())
-        if target != self._model_device:
-            self._graphs.clear()
-            self.clear_cache()
-            self.model.to(target)
-            self._model_device = target
+    def get_initial_state(self) -> LM_STATE:
+        delimiter = self.model.document_delimiter
+        tokens = [self.model.dictionary.get_idx_for_item(char) for char in delimiter]
+        return self._forward(tokens, self.model.init_hidden(1))
 
-        contexts = [
-            tuple(
-                ([self.space_id] + [self.token_ids[token] for token in prefix])[
-                    -self.context_size :
-                ]
-            )
-            for prefix in prefixes
-        ]
-        missing = list(
-            dict.fromkeys(
-                context for context in contexts if context not in self._scores
-            )
-        )
-        with torch.cuda.device(target) if target.type == "cuda" else nullcontext():
-            for start in range(0, len(missing), self.batch_size):
-                rows = missing[start : start + self.batch_size]
-                lengths = torch.tensor([len(row) for row in rows], device=target)
-                with torch.autocast(device_type=target.type, enabled=False):
-                    if self.use_cuda_graphs and target.type == "cuda":
-                        logits = self._graph_logits(rows, target)
-                    else:
-                        ids = torch.nn.utils.rnn.pad_sequence(
-                            [torch.tensor(row, dtype=torch.long) for row in rows],
-                            batch_first=True,
-                        ).to(target)
-                        logits = self.model(input_ids=ids).logits
-                    last = logits[torch.arange(len(rows), device=target), lengths - 1]
-                    scores = last.float().log_softmax(-1)[:, self.token_ids]
-                scores[:, self.blank_id] = 0.0
-                self._scores.update(zip(rows, scores.cpu().tolist()))
-        return [self._scores[context] for context in contexts]
+    @torch.inference_mode()
+    def step(self, state: RNN_STATE, token: int) -> LM_STATE:
+        if not 0 <= token < len(self.id_to_lm_token) or token == self.blank_id:
+            raise ValueError(f"Expected a non-blank ASR token, got {token}")
+        return self._forward([self.id_to_lm_token[token]], state)

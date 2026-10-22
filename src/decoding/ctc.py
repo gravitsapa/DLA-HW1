@@ -4,6 +4,7 @@ import torch
 from torch import Tensor
 
 from src.decoding.base import DecoderBase, log_add
+from src.decoding.lm import LM_STATE
 from src.model.head.linear_head import LinearHead
 
 
@@ -64,6 +65,11 @@ class DecoderCTC(DecoderBase):
         _use_lm: bool = False,
         **kwargs,
     ) -> dict:
+        use_lm = _use_lm and self.lm_weight != 0
+
+        if use_lm and self.lm is None:
+            raise ValueError("beam search with lm needs lm initialization")
+
         output = head(
             hidden_state=hidden_state,
             hidden_states_length=hidden_states_length,
@@ -80,20 +86,15 @@ class DecoderCTC(DecoderBase):
         tokens = torch.full((batch_size, time_steps), self.blank_id, dtype=torch.long)
         lengths = torch.zeros(batch_size, dtype=torch.long)
         negative_inf = -math.inf
-        use_lm = _use_lm and self.lm_weight != 0
 
         for batch_idx, length in enumerate(input_lengths):
             beam = {(): (0.0, negative_inf)}
+            if use_lm:
+                lm_states = {(): (self.lm.get_initial_state() if use_lm else None)}
             for frame in probabilities[batch_idx, : int(length)].tolist():
                 next_beam = {}
-                lm_scores = (
-                    self._lm_scores(list(beam), log_probs.device, n_tokens)
-                    if use_lm
-                    else [None] * len(beam)
-                )
-                for (prefix, (p_blank, p_nonblank)), lm_row in zip(
-                    beam.items(), lm_scores
-                ):
+                new_states = {}
+                for prefix, (p_blank, p_nonblank) in beam.items():
                     total = log_add(p_blank, p_nonblank)
                     old_blank, old_nonblank = next_beam.get(
                         prefix, (negative_inf, negative_inf)
@@ -102,6 +103,9 @@ class DecoderCTC(DecoderBase):
                         log_add(old_blank, total + frame[self.blank_id]),
                         old_nonblank,
                     )
+
+                    if use_lm:
+                        lm_probs, dynamic_cache = lm_states[prefix]
 
                     for token, token_prob in enumerate(frame):
                         if token == self.blank_id or token_prob == negative_inf:
@@ -119,7 +123,7 @@ class DecoderCTC(DecoderBase):
                         if extension_prob == negative_inf:
                             continue
                         if use_lm:
-                            extension_prob += self.lm_weight * lm_row[token]
+                            extension_prob += self.lm_weight * lm_probs[token]
                         extension = prefix + (token,)
                         old_blank, old_nonblank = next_beam.get(
                             extension, (negative_inf, negative_inf)
@@ -128,6 +132,8 @@ class DecoderCTC(DecoderBase):
                             old_blank,
                             log_add(old_nonblank, extension_prob),
                         )
+                        if use_lm and extension not in beam:
+                            new_states[extension] = (dynamic_cache, token)
 
                 beam = dict(
                     sorted(
@@ -135,6 +141,13 @@ class DecoderCTC(DecoderBase):
                         key=lambda item: (-log_add(*item[1]), item[0]),
                     )[:beam_size]
                 )
+                if use_lm:
+                    lm_states = {
+                        prefix: lm_states[prefix]
+                        if prefix in lm_states
+                        else self.lm.step(*new_states[prefix])
+                        for prefix in beam
+                    }
 
             best_prefix = next(iter(beam))
             lengths[batch_idx] = len(best_prefix)

@@ -10,7 +10,7 @@ defaults:
   - override transforms/instance_transforms: no_augmentation
   - _self_
 
-experiment_name: conf_s_rnnt_test_lm_final
+experiment_name: conf_s_rnnt_test
 sample_rate: 16000
 
 model:

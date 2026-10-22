@@ -5,7 +5,7 @@ from enum import StrEnum
 import torch
 from torch import Tensor, nn
 
-from src.decoding.lm import NoTokenLM
+from src.decoding.lm import FlairCharLM
 
 
 class DecodeMethod(StrEnum):
@@ -15,7 +15,7 @@ class DecodeMethod(StrEnum):
 
 
 class DecoderBase(nn.Module):
-    def __init__(self, lm: NoTokenLM | None, lm_weight: float = 0.2, **kwargs):
+    def __init__(self, lm: FlairCharLM | None, lm_weight: float, **kwargs):
         super().__init__()
         self.lm = lm
         self.lm_weight = lm_weight
@@ -31,16 +31,15 @@ class DecoderBase(nn.Module):
     def beam_search_lm(self, **kwargs) -> dict:
         if self.lm is None:
             raise ValueError("beam_search_lm requires a configured lm")
-        self.lm.clear_cache()
+
+        clear_cache = getattr(self.lm, "clear_cache", None)
+        if clear_cache is not None:
+            clear_cache()
         try:
             return self.beam_search(_use_lm=True, **kwargs)
         finally:
-            self.lm.clear_cache()
-
-    def _lm_scores(self, prefixes, device, n_tokens):
-        assert self.lm is not None
-        scores = self.lm.score_prefixes(prefixes, device=device)
-        return scores
+            if clear_cache is not None:
+                clear_cache()
 
     def forward(self, method: DecodeMethod, **kwargs) -> dict:
         if method == DecodeMethod.GREEDY:

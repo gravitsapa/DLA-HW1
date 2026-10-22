@@ -163,6 +163,8 @@ class DecoderRNNT(DecoderBase):
 
         result = self._empty_result(hidden_state, limit)
         use_lm = _use_lm and self.lm_weight != 0
+        if use_lm and self.lm is None:
+            raise ValueError("beam search with lm needs lm initialization")
 
         device = hidden_state.device
         input_length = hidden_states_length.to(device)
@@ -178,9 +180,13 @@ class DecoderRNNT(DecoderBase):
 
         for batch_index, length in enumerate(input_length):
             beam = {(): (0.0, root)}
+            lm_states = (
+                {(): self.lm.get_initial_state()} if use_lm and int(length) > 0 else {}
+            )
             for time in range(length):
                 active = beam
                 completed = {}
+                completed_lm_states = {}
                 for depth in range(limit + 1):
                     if depth == limit:
                         for prefix, (score, prediction) in active.items():
@@ -188,6 +194,8 @@ class DecoderRNNT(DecoderBase):
                                 0
                             ]
                             completed[prefix] = (log_add(old_score, score), prediction)
+                            if use_lm:
+                                completed_lm_states[prefix] = lm_states[prefix]
                         break
                     prefixes = list(active)
                     contexts = torch.cat(
@@ -197,16 +205,14 @@ class DecoderRNNT(DecoderBase):
                         enc_context[batch_index, time].unsqueeze(0), contexts
                     )
                     probabilities = logits.float().log_softmax(-1).cpu().tolist()
-                    lm_scores = (
-                        self._lm_scores(prefixes, device, logits.shape[-1])
-                        if use_lm
-                        else [None] * len(prefixes)
-                    )
                     candidates = {}
-                    for prefix, frame, lm_row in zip(
-                        prefixes, probabilities, lm_scores
-                    ):
+                    for prefix, frame in zip(prefixes, probabilities):
                         score, prediction = active[prefix]
+                        lm_row = (
+                            lm_states[prefix][0].detach().cpu().tolist()
+                            if use_lm
+                            else None
+                        )
                         blank_score = score + frame[self.blank_id]
                         if blank_score != -math.inf:
                             old_score = completed.get(prefix, (-math.inf, prediction))[
@@ -216,6 +222,8 @@ class DecoderRNNT(DecoderBase):
                                 log_add(old_score, blank_score),
                                 prediction,
                             )
+                            if use_lm:
+                                completed_lm_states[prefix] = lm_states[prefix]
                         for token, token_score in enumerate(frame):
                             if token == self.blank_id or token_score == -math.inf:
                                 continue
@@ -235,6 +243,18 @@ class DecoderRNNT(DecoderBase):
                         head,
                         cache,
                     )
+                    if use_lm:
+                        next_lm_states = {}
+                        for prefix in retained:
+                            if prefix in lm_states:
+                                next_lm_states[prefix] = lm_states[prefix]
+                            elif prefix in completed_lm_states:
+                                next_lm_states[prefix] = completed_lm_states[prefix]
+                            else:
+                                next_lm_states[prefix] = self.lm.step(
+                                    lm_states[prefix[:-1]][1], prefix[-1]
+                                )
+                        lm_states = next_lm_states
                     active = {
                         prefix: (candidates[prefix][0], prediction)
                         for prefix, prediction in zip(retained, predictions)
@@ -247,6 +267,10 @@ class DecoderRNNT(DecoderBase):
                     completed, key=lambda prefix: (-completed[prefix][0], prefix)
                 )[:width]
                 beam = {prefix: completed[prefix] for prefix in retained}
+                if use_lm:
+                    lm_states = {
+                        prefix: completed_lm_states[prefix] for prefix in retained
+                    }
             transcripts.append(next(iter(beam)))
 
         tokens = torch.full(
