@@ -1,0 +1,2 @@
+_target_: src.model.head.linear_head.LinearHead
+_partial_: true

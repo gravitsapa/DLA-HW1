@@ -1,0 +1,8 @@
+defaults:
+  - onebatch_ctc
+  - override model/head@model.head_factory: rnnt
+  - override model/decoder@model.decoder_factory: rnnt
+  - override loss_function: rnnt
+  - _self_
+
+experiment_name: ds2_rnnt_onebatch

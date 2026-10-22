@@ -1,0 +1,10 @@
+defaults:
+  - /model/predictor@predictor_factory: lstm
+  - _self_
+
+_target_: src.model.head.rnnt_head.RNNTHead
+_partial_: true
+joint_hidden_size: 512
+joint_act_fn:
+  _target_: torch.nn.Tanh
+  _partial_: true

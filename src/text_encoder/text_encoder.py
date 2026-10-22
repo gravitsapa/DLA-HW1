@@ -2,14 +2,10 @@ import re
 from string import ascii_lowercase
 
 import torch
-
-# TODO add BPE, LM, Beam Search support
-# Note: think about metrics and encoder
-# The design can be remarkably improved
-# to calculate stuff more efficiently and prettier
+from torch import Tensor
 
 
-class CTCTextEncoder:
+class TextEncoder:
     EMPTY_TOK = ""
 
     def __init__(self, alphabet=None, **kwargs):
@@ -24,6 +20,8 @@ class CTCTextEncoder:
 
         self.alphabet = alphabet
         self.vocab = [self.EMPTY_TOK] + list(self.alphabet)
+        self.blank_id = 0
+        self.space_id = self.vocab.index(" ")
 
         self.ind2char = dict(enumerate(self.vocab))
         self.char2ind = {v: k for k, v in self.ind2char.items()}
@@ -32,10 +30,9 @@ class CTCTextEncoder:
         return len(self.vocab)
 
     def __getitem__(self, item: int):
-        assert type(item) is int
         return self.ind2char[item]
 
-    def encode(self, text) -> torch.Tensor:
+    def encode(self, text: str) -> torch.Tensor:
         text = self.normalize_text(text)
         try:
             return (
@@ -49,29 +46,22 @@ class CTCTextEncoder:
                 f"Can't encode text '{text}'. Unknown chars: '{' '.join(unknown_chars)}'"
             )
 
-    def decode(self, inds) -> str:
-        """
-        Raw decoding without CTC.
-        Used to validate the CTC decoding implementation.
+    def decode_text(
+        self,
+        tokens: Tensor,
+        length: int,
+    ) -> str:
+        return "".join(self[int(token_id.item())] for token_id in tokens[:length])
 
-        Args:
-            inds (list): list of tokens.
-        Returns:
-            raw_text (str): raw text with empty tokens and repetitions.
-        """
-        return "".join([self.ind2char[int(ind)] for ind in inds]).strip()
-
-    def ctc_decode(self, inds) -> str:
-        last_char = self.EMPTY_TOK
-        decoded_symbols = []
-
-        for ind in inds:
-            char = self.ind2char[int(ind)]
-            if char != last_char and char != self.EMPTY_TOK:
-                decoded_symbols.append(char)
-            last_char = char
-
-        return "".join(decoded_symbols)
+    def decode_batch(
+        self,
+        tokens: Tensor,
+        lengths: Tensor,
+    ) -> list[str]:
+        return [
+            self.decode_text(tokens_row, int(length.item()))
+            for tokens_row, length in zip(tokens, lengths, strict=True)
+        ]
 
     @staticmethod
     def normalize_text(text: str):

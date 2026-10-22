@@ -1,13 +1,62 @@
 defaults:
-  - model: baseline
-  - metrics: example
-  - datasets: example_eval # we do not want to run inference on training data
-  - dataloader: example
-  - transforms: example
+  - model: asr
+  - metrics: inference_lm
+  - datasets: test
+  - dataloader: inference
+  - transforms: train
+  - override model/encoder@model.encoder_factory: conformer
+  - override model/head@model.head_factory: rnnt
+  - override model/decoder@model.decoder_factory: rnnt_lm
+  - override transforms/instance_transforms: no_augmentation
   - _self_
+
+experiment_name: conf_s_rnnt_test_lm_flair
+sample_rate: 16000
+
+model:
+  encoder_factory:
+    n_feats: 80
+    model_dim: 144
+    n_layers: 16
+    n_heads: 4
+    ff_expansion_factor: 4
+    conv_kernel_size: 32
+    dropout: 0.1
+    attention_dropout: 0.1
+    subsampling_channels: 144
+  head_factory:
+    predictor_factory:
+      emb_size: 256
+      hidden_size: 512
+      lstm_layers: 1
+    joint_hidden_size: 512
+  decoder_factory:
+    lm_weight: 0.175
+    beam_size: 10
+    max_symbols_per_step: 5
+    max_cache_size: 4096
+
+dataloader:
+  batch_size: 16
+  num_workers: 8
+  pin_memory: true
+
+text_encoder:
+  _target_: src.text_encoder.TextEncoder
+
 inferencer:
-  device_tensors: ["data_object", "labels"] # which tensors should be on device (ex. GPU)
-  device: auto # device name or "auto"
-  save_path: "example" # any name here, can be a dataset name
+  from_pretrained: saved/model.pth
+  device: cuda
+  device_tensors: [spectrogram]
+  decode_methods: ${metrics.decode_methods}
+  final_decode_method: beam_search_lm # null disables saving individual transcriptions
+  save_dir: saved/inference
+  save_predictions: true
   seed: 1
-  from_pretrained: "saved/model_best.pth" # path to the pretrained model
+
+hydra:
+  job:
+    chdir: false
+    env_set:
+      TORCH_CUDNN_V8_API_DISABLED: "1"
+      TORCH_ALLOW_TF32_CUBLAS_OVERRIDE: "1"

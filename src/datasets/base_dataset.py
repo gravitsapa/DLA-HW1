@@ -1,17 +1,18 @@
 import logging
 import random
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
 import torchaudio
 from torch.utils.data import Dataset
 
-from src.text_encoder import CTCTextEncoder
+from src.text_encoder import TextEncoder
 
 logger = logging.getLogger(__name__)
 
 
-class BaseDataset(Dataset):
+class BaseDataset(Dataset, ABC):
     """
     Base class for the datasets.
 
@@ -51,7 +52,9 @@ class BaseDataset(Dataset):
         self._assert_index_is_valid(index)
 
         index = self._filter_records_from_dataset(
-            index, max_audio_length, max_text_length
+            index,
+            max_audio_length,
+            max_text_length if self.has_ground_truth() else None,
         )
         index = self._shuffle_and_limit_index(index, limit, shuffle_index)
         if not shuffle_index:
@@ -62,6 +65,10 @@ class BaseDataset(Dataset):
         self.text_encoder = text_encoder
         self.target_sr = target_sr
         self.instance_transforms = instance_transforms
+
+    @abstractmethod
+    def has_ground_truth(self) -> bool:
+        raise NotImplementedError()
 
     def __getitem__(self, ind):
         """
@@ -85,15 +92,17 @@ class BaseDataset(Dataset):
         instance_data["audio_path"] = data_dict["path"]
         instance_data["original_audio"] = self.load_audio(instance_data["audio_path"])
         instance_data["audio"] = instance_data["original_audio"].detach().clone()
-        instance_data["text"] = data_dict["text"]
-        instance_data = self.preprocess_data(instance_data, ("audio", "text"))
-
-        instance_data["text_encoded"] = self.text_encoder.encode(instance_data["text"])
+        instance_data = self.preprocess_data(instance_data, "audio")
+        if self.has_ground_truth():
+            instance_data["text"] = data_dict["text"]
+            instance_data = self.preprocess_data(instance_data, "text")
+            instance_data["text_encoded"] = self.text_encoder.encode(
+                instance_data["text"]
+            )
+            instance_data = self.preprocess_data(instance_data, "text_encoded")
         instance_data["spectrogram"] = self.get_spectrogram(instance_data["audio"])
 
-        instance_data = self.preprocess_data(
-            instance_data, ("text_encoded", "spectrogram")
-        )
+        instance_data = self.preprocess_data(instance_data, "spectrogram")
 
         return instance_data
 
@@ -189,9 +198,7 @@ class BaseDataset(Dataset):
         initial_size = len(index)
         if max_text_length is not None:
             exceeds_text_length = (
-                np.array(
-                    [len(CTCTextEncoder.normalize_text(el["text"])) for el in index]
-                )
+                np.array([len(TextEncoder.normalize_text(el["text"])) for el in index])
                 >= max_text_length
             )
             _total = exceeds_text_length.sum()
@@ -213,8 +220,7 @@ class BaseDataset(Dataset):
 
         return index
 
-    @staticmethod
-    def _assert_index_is_valid(index):
+    def _assert_index_is_valid(self, index):
         """
         Check the structure of the index and ensure it satisfies the desired
         conditions.
@@ -228,7 +234,7 @@ class BaseDataset(Dataset):
             assert "path" in entry, (
                 "Each dataset item should include field 'path'" " - path to audio file."
             )
-            assert "text" in entry, (
+            assert not self.has_ground_truth() or isinstance(entry.get("text"), str), (
                 "Each dataset item should include field 'text'"
                 " - object ground-truth transcription."
             )

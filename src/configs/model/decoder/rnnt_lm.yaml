@@ -1,0 +1,10 @@
+defaults:
+  - rnnt
+  - _self_
+
+lm:
+  _target_: src.decoding.lm.FlairCharLM
+  text_encoder: ${text_encoder}
+  model_name: news-forward-fast
+  cache_size: 4096
+  device: ${oc.select:inferencer.device,${oc.select:trainer.device,auto}}

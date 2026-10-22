@@ -1,16 +1,21 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
+from pathlib import Path
 
+import pandas as pd
 import torch
 from numpy import inf
 from torch.nn.utils import clip_grad_norm_
 from tqdm.auto import tqdm
 
 from src.datasets.data_utils import inf_loop
+from src.decoding.base import DecodeMethod
+from src.logger.utils import plot_spectrogram
 from src.metrics.tracker import MetricTracker
+from src.metrics.utils import calc_cer, calc_wer
 from src.utils.io_utils import ROOT_PATH
 
 
-class BaseTrainer:
+class BaseTrainer(ABC):
     """
     Base class for all trainers.
     """
@@ -61,6 +66,9 @@ class BaseTrainer:
 
         self.config = config
         self.cfg_trainer = self.config.trainer
+        self.decode_methods = [
+            DecodeMethod(method) for method in self.cfg_trainer.decode_methods
+        ]
 
         self.device = device
         self.skip_oom = skip_oom
@@ -146,155 +154,6 @@ class BaseTrainer:
 
         if config.trainer.get("from_pretrained") is not None:
             self._from_pretrained(config.trainer.get("from_pretrained"))
-
-    def train(self):
-        """
-        Wrapper around training process to save model on keyboard interrupt.
-        """
-        try:
-            self._train_process()
-        except KeyboardInterrupt as e:
-            self.logger.info("Saving model on keyboard interrupt")
-            self._save_checkpoint(self._last_epoch, save_best=False)
-            raise e
-
-    def _train_process(self):
-        """
-        Full training logic:
-
-        Training model for an epoch, evaluating it on non-train partitions,
-        and monitoring the performance improvement (for early stopping
-        and saving the best checkpoint).
-        """
-        not_improved_count = 0
-        for epoch in range(self.start_epoch, self.epochs + 1):
-            self._last_epoch = epoch
-            result = self._train_epoch(epoch)
-
-            # save logged information into logs dict
-            logs = {"epoch": epoch}
-            logs.update(result)
-
-            # print logged information to the screen
-            for key, value in logs.items():
-                self.logger.info(f"    {key:15s}: {value}")
-
-            # evaluate model performance according to configured metric,
-            # save best checkpoint as model_best
-            best, stop_process, not_improved_count = self._monitor_performance(
-                logs, not_improved_count
-            )
-
-            if epoch % self.save_period == 0 or best:
-                self._save_checkpoint(epoch, save_best=best, only_best=True)
-
-            if stop_process:  # early_stop
-                break
-
-    def _train_epoch(self, epoch):
-        """
-        Training logic for an epoch, including logging and evaluation on
-        non-train partitions.
-
-        Args:
-            epoch (int): current training epoch.
-        Returns:
-            logs (dict): logs that contain the average loss and metric in
-                this epoch.
-        """
-        self.is_train = True
-        self.model.train()
-        if torch.device(self.device).type == "cuda":
-            torch.cuda.reset_peak_memory_stats(self.device)
-        self.train_metrics.reset()
-        self.writer.set_step((epoch - 1) * self.epoch_len)
-        self.writer.add_scalar("epoch", epoch)
-        for batch_idx, batch in enumerate(
-            tqdm(self.train_dataloader, desc="train", total=self.epoch_len)
-        ):
-            try:
-                batch = self.process_batch(
-                    batch,
-                    metrics=self.train_metrics,
-                )
-            except torch.cuda.OutOfMemoryError as e:
-                if self.skip_oom:
-                    self.logger.warning("OOM on batch. Skipping batch.")
-                    torch.cuda.empty_cache()  # free some memory
-                    continue
-                else:
-                    raise e
-
-            if batch["loss_is_correct"]:
-                self.train_metrics.update_mean("grad_norm", self._get_grad_norm())
-
-            # log current results
-            if batch_idx % self.log_step == 0:
-                self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
-                self.logger.debug(
-                    "Train Epoch: {} {} Loss: {:.6f}".format(
-                        epoch, self._progress(batch_idx), batch["loss"].item()
-                    )
-                )
-                self.writer.add_scalar(
-                    "learning rate", self.lr_scheduler.get_last_lr()[0]
-                )
-                self._log_scalars(self.train_metrics)
-                self._log_batch(batch_idx, batch)
-                # we don't want to reset train metrics at the start of every epoch
-                # because we are interested in recent train metrics
-                last_train_metrics = self.train_metrics.result()
-                self.train_metrics.reset()
-            if batch_idx + 1 >= self.epoch_len:
-                break
-
-        logs = last_train_metrics
-        self.writer.set_step(epoch * self.epoch_len)
-        logs.update(self._log_peak_gpu_memory())
-
-        # Run val/test
-        for part, dataloader in self.evaluation_dataloaders.items():
-            val_logs = self._evaluation_epoch(epoch, part, dataloader)
-            logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
-
-        return logs
-
-    def _evaluation_epoch(self, epoch, part, dataloader):
-        """
-        Evaluate model on the partition after training for an epoch.
-
-        Args:
-            epoch (int): current training epoch.
-            part (str): partition to evaluate on
-            dataloader (DataLoader): dataloader for the partition.
-        Returns:
-            logs (dict): logs that contain the information about evaluation.
-        """
-        self.is_train = False
-        self.model.eval()
-        if torch.device(self.device).type == "cuda":
-            torch.cuda.reset_peak_memory_stats(self.device)
-        self.evaluation_metrics.reset()
-        with torch.no_grad():
-            for batch_idx, batch in tqdm(
-                enumerate(dataloader),
-                desc=part,
-                total=len(dataloader),
-            ):
-                batch = self.process_batch(
-                    batch,
-                    metrics=self.evaluation_metrics,
-                )
-            self.writer.set_step(epoch * self.epoch_len, part)
-            self._log_scalars(self.evaluation_metrics)
-            self._log_batch(
-                batch_idx, batch, part
-            )  # log only the last batch during inference
-
-        logs = self.evaluation_metrics.result()
-        self.writer.set_step(epoch * self.epoch_len, part)
-        logs.update(self._log_peak_gpu_memory())
-        return logs
 
     def _monitor_performance(self, logs, not_improved_count):
         """
@@ -388,6 +247,26 @@ class BaseTrainer:
                 )
         return batch
 
+    def decode_batch(self, batch):
+        for decode_method in self.decode_methods:
+            decoded_tokens = self.model.decode(
+                decode_method=decode_method,
+                **batch,
+            )
+            batch.update(
+                {
+                    f"{key}_{str(decode_method)}": val
+                    for key, val in decoded_tokens.items()
+                }
+            )
+            prediction = self.text_encoder.decode_batch(
+                tokens=decoded_tokens["tokens_predicted"],
+                lengths=decoded_tokens["lengths_predicted"],
+            )
+            batch[f"text_predicted_{str(decode_method)}"] = prediction
+
+        return batch
+
     def _clip_grad_norm(self):
         """
         Clips the gradient norm by the value defined in
@@ -436,23 +315,6 @@ class BaseTrainer:
             current = batch_idx
             total = self.epoch_len
         return base.format(current, total, 100.0 * current / total)
-
-    @abstractmethod
-    def _log_batch(self, batch_idx, batch, mode="train"):
-        """
-        Abstract method. Should be defined in the nested Trainer Class.
-
-        Log data from batch. Calls self.writer.add_* to log data
-        to the experiment tracker.
-
-        Args:
-            batch_idx (int): index of the current batch.
-            batch (dict): dict-based batch after going through
-                the 'process_batch' function.
-            mode (str): train or inference. Defines which logging
-                rules to apply.
-        """
-        raise NotImplementedError()
 
     def _log_scalars(self, metric_tracker: MetricTracker):
         """
@@ -522,7 +384,7 @@ class BaseTrainer:
         """
         resume_path = str(resume_path)
         self.logger.info(f"Loading checkpoint: {resume_path} ...")
-        checkpoint = torch.load(resume_path, self.device)
+        checkpoint = torch.load(resume_path, self.device, weights_only=False)
         self.start_epoch = checkpoint["epoch"] + 1
         self.mnt_best = checkpoint["monitor_best"]
 
@@ -568,9 +430,78 @@ class BaseTrainer:
             self.logger.info(f"Loading model weights from: {pretrained_path} ...")
         else:
             print(f"Loading model weights from: {pretrained_path} ...")
-        checkpoint = torch.load(pretrained_path, self.device)
+        checkpoint = torch.load(pretrained_path, self.device, weights_only=False)
 
         if checkpoint.get("state_dict") is not None:
             self.model.load_state_dict(checkpoint["state_dict"])
         else:
             self.model.load_state_dict(checkpoint)
+
+    def log_spectrogram(self, spectrogram, spectrogram_length, index, **batch):
+        length = int(spectrogram_length[index].item())
+        spectrogram_for_plot = spectrogram[index, :, :length].detach().cpu()
+        image = plot_spectrogram(spectrogram_for_plot)
+        self.writer.add_image("spectrogram", image)
+
+    def log_audio(self, audio, audio_length, sample_rate, audio_path, name, index):
+        length = int(audio_length[index].item())
+        path = Path(audio_path[index]).name
+
+        waveform = audio[index, :length].detach().cpu()
+
+        self.writer.add_audio(
+            f"({name}){path}",
+            waveform,
+            sample_rate=sample_rate,
+        )
+
+    def log_original_audio(
+        self,
+        original_audio,
+        original_audio_length,
+        sample_rate,
+        audio_path,
+        index,
+        **batch,
+    ):
+        self.log_audio(
+            original_audio,
+            original_audio_length,
+            sample_rate,
+            audio_path,
+            "original",
+            index=index,
+        )
+
+    def log_augmented_audio(
+        self, audio, audio_length, sample_rate, audio_path, index, **batch
+    ):
+        self.log_audio(
+            audio, audio_length, sample_rate, audio_path, "augmented", index=index
+        )
+
+    def log_predictions(self, text, audio_path, examples_to_log=10, **batch):
+        for decode_method in self.decode_methods:
+            if f"text_predicted_{str(decode_method)}" not in batch:
+                continue
+            texts_predicted = batch[f"text_predicted_{str(decode_method)}"]
+
+            tuples = list(zip(texts_predicted, text, audio_path))
+
+            rows = {}
+            for pred, target, path in tuples[:examples_to_log]:
+                target = self.text_encoder.normalize_text(target)
+                wer = calc_wer(target, pred) * 100
+                cer = calc_cer(target, pred) * 100
+
+                rows[Path(path).name] = {
+                    "step": self.writer.step,
+                    "method": str(decode_method),
+                    "target": target,
+                    "predictions": pred,
+                    "wer": wer,
+                    "cer": cer,
+                }
+            self.writer.add_table(
+                "predictions", pd.DataFrame.from_dict(rows, orient="index")
+            )

@@ -1,10 +1,8 @@
+decode_methods: [greedy, beam_search]
+
 train: # metrics that are calculated during training
   - _target_: src.metrics.IncorrectLosses
     name: "Incorrect_losses_count"
-  - _target_: src.metrics.ArgmaxCERMetric
-    name: "CER_(Argmax)"
-  - _target_: src.metrics.ArgmaxWERMetric
-    name: "WER_(Argmax)"
   - _target_: src.metrics.AudioPaddingRatioMetric
     name: "audio_padding_ratio"
   - _target_: src.metrics.SpectrogramPaddingRatioMetric
@@ -12,7 +10,15 @@ train: # metrics that are calculated during training
   - _target_: src.metrics.TextPaddingRatioMetric
     name: "text_padding_ratio"
 inference: # metrics that are calculated during inference (eval)
-  - _target_: src.metrics.ArgmaxCERMetric
-    name: "CER_(Argmax)"
-  - _target_: src.metrics.ArgmaxWERMetric
-    name: "WER_(Argmax)"
+  - _target_: src.metrics.CERMetric
+    decode_method: "greedy"
+    name: "CER_(Greedy)"
+  - _target_: src.metrics.CERMetric
+    decode_method: "beam_search"
+    name: "CER_(Beam_search)"
+  - _target_: src.metrics.WERMetric
+    decode_method: "greedy"
+    name: "WER_(Greedy)"
+  - _target_: src.metrics.WERMetric
+    decode_method: "beam_search"
+    name: "WER_(Beam_search)"

@@ -1,0 +1,20 @@
+defaults:
+  - train
+  - _self_
+
+train:
+  part: train-clean-360
+  limit: 48
+
+train_eval:
+  part: train-clean-360
+  limit: 24
+  shuffle_index: true
+
+val_clean:
+  limit: 24
+  shuffle_index: true
+
+val_other:
+  limit: 24
+  shuffle_index: true

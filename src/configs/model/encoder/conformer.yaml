@@ -1,0 +1,11 @@
+_target_: src.model.encoder.conformer.Conformer
+_partial_: true
+n_feats: 80
+model_dim: 144
+n_layers: 16
+n_heads: 4
+ff_expansion_factor: 4
+conv_kernel_size: 32
+dropout: 0.1
+attention_dropout: 0.1
+subsampling_channels: 144

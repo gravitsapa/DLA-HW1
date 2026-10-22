@@ -1,0 +1,71 @@
+defaults:
+  - model: asr
+  - loss_function: rnnt
+  - writer: cometml
+  - metrics: train
+  - datasets: train360
+  - dataloader: train
+  - transforms: train
+  - override model/encoder@model.encoder_factory: conformer
+  - override model/head@model.head_factory: rnnt
+  - override model/decoder@model.decoder_factory: rnnt
+  - _self_
+
+experiment_name: train_conformer_rnnt
+sample_rate: 16000
+
+dataloader:
+  batch_size: 12
+  num_workers: 6
+  pin_memory: true
+  persistent_workers: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 6.0e-4
+  betas: [0.9, 0.98]
+  eps: 1.0e-9
+  weight_decay: 1.0e-6
+
+lr_scheduler:
+  _target_: transformers.optimization.get_cosine_schedule_with_warmup
+  num_warmup_steps: ${trainer.epoch_len}
+  num_training_steps:
+    _target_: operator.mul
+    _args_: ["${trainer.n_epochs}", "${trainer.epoch_len}"]
+  num_cycles: 0.5
+
+text_encoder:
+  _target_: src.text_encoder.TextEncoder
+
+model:
+  decoder_factory:
+    lm: null
+
+writer:
+  mode: online
+  log_checkpoints: true
+
+trainer:
+  decode_methods: ${metrics.decode_methods}
+  device: cuda
+  device_tensors: [spectrogram, text_encoded]
+  epoch_len: 8192
+  n_epochs: 20
+  log_step: 100
+  max_grad_norm: 400.0
+  monitor: "min val_clean_WER_(Beam_search)"
+  early_stop: ${trainer.n_epochs}
+  save_period: 1
+  save_dir: saved
+  override: false
+  resume_from: null
+  from_pretrained: null
+  seed: 1
+  skip_oom: false
+
+hydra:
+  job:
+    env_set:
+      TORCH_ALLOW_TF32_CUBLAS_OVERRIDE: "1"
+      TORCH_CUDNN_V8_API_DISABLED: "1"

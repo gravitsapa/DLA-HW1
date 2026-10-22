@@ -95,3 +95,6 @@ class LibrispeechDataset(BaseDataset):
                         }
                     )
         return index
+
+    def has_ground_truth(self) -> bool:
+        return True

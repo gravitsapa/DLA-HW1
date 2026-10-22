@@ -1,6 +1,13 @@
+import gc
+from pathlib import Path
+
+import pandas as pd
 import torch
+from torch import Tensor
 from tqdm.auto import tqdm
 
+from src.decoding.base import DecodeMethod
+from src.metrics.text_metrics.base import TextMetricBase
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 
@@ -22,7 +29,8 @@ class Inferencer(BaseTrainer):
         dataloaders,
         text_encoder,
         save_path,
-        metrics=None,
+        logger,
+        metrics,
         batch_transforms=None,
         skip_model_load=False,
     ):
@@ -49,39 +57,47 @@ class Inferencer(BaseTrainer):
                 the model desirable weights are defined outside of the
                 Inferencer Class.
         """
-        assert (
-            skip_model_load or config.inferencer.get("from_pretrained") is not None
-        ), "Provide checkpoint or set skip_model_load=True"
+        if not skip_model_load and config.inferencer.get("from_pretrained") is None:
+            raise ValueError("Provide checkpoint or set skip_model_load=True")
 
         self.config = config
         self.cfg_trainer = self.config.inferencer
+        self.decode_methods = [
+            DecodeMethod(method) for method in self.cfg_trainer.decode_methods
+        ]
+        final_method = self.cfg_trainer.get("final_decode_method")
+        self.final_decode_method = (
+            None if final_method in (None, "none") else DecodeMethod(final_method)
+        )
+        if (
+            self.final_decode_method is not None
+            and self.final_decode_method not in self.decode_methods
+        ):
+            raise ValueError("final_decode_method must be included in decode_methods")
 
         self.device = device
+
+        self.logger = logger
 
         self.model = model
         self.batch_transforms = batch_transforms
 
         self.text_encoder = text_encoder
 
-        # define dataloaders
         self.evaluation_dataloaders = {k: v for k, v in dataloaders.items()}
-
-        # path definition
 
         self.save_path = save_path
 
         # define metrics
         self.metrics = metrics
-        if self.metrics is not None:
-            self.evaluation_metrics = MetricTracker(
-                [m.name for m in self.metrics["inference"] if m.avg_type() == "mean"],
-                [m.name for m in self.metrics["inference"] if m.avg_type() == "sum"],
-            )
-        else:
-            self.evaluation_metrics = None
+        self.evaluation_metrics = MetricTracker(
+            [m.name for m in self.metrics["inference"] if m.avg_type() == "mean"],
+            sum_keys=[
+                m.name for m in self.metrics["inference"] if m.avg_type() == "sum"
+            ],
+        )
 
         if not skip_model_load:
-            # init model
             self._from_pretrained(config.inferencer.get("from_pretrained"))
 
     def run_inference(self):
@@ -96,9 +112,18 @@ class Inferencer(BaseTrainer):
         for part, dataloader in self.evaluation_dataloaders.items():
             logs = self._inference_part(part, dataloader)
             part_logs[part] = logs
+
+            for key, value in logs.items():
+                self.logger.info("%s/%s: %.6f", part, key, value)
+
         return part_logs
 
-    def process_batch(self, batch_idx, batch, metrics, part):
+    def process_batch(
+        self,
+        batch: dict,
+        metrics: MetricTracker,
+        part: str,
+    ):
         """
         Run batch through the model, compute metrics, and
         save predictions to disk.
@@ -107,7 +132,7 @@ class Inferencer(BaseTrainer):
         config and current partition.
 
         Args:
-            batch_idx (int): the index of the current batch.
+            processed_samples (int): cnt of processed samples.
             batch (dict): dict-based batch containing the data from
                 the dataloader.
             metrics (MetricTracker): MetricTracker object that computes
@@ -120,42 +145,23 @@ class Inferencer(BaseTrainer):
                 the dataloader (possibly transformed via batch transform)
                 and model outputs.
         """
-        # TODO change inference logic so it suits ASR assignment
-        # and task pipeline
-
         batch = self.move_batch_to_device(batch)
-        batch = self.transform_batch(batch)  # transform batch on device -- faster
+        batch = self.transform_batch(batch)
 
-        outputs = self.model(**batch)
+        metric_funcs = self.metrics["inference"]
+
+        outputs = self.model.encode(**batch)
         batch.update(outputs)
 
-        if metrics is not None:
-            for met in self.metrics["inference"]:
-                metrics.update_by_type(met.avg_type(), met.name, **met(**batch))
+        batch = self.decode_batch(batch)
 
-        # Some saving logic. This is an example
-        # Use if you need to save predictions on disk
-
-        batch_size = batch["logits"].shape[0]
-        current_id = batch_idx * batch_size
-
-        for i in range(batch_size):
-            # clone because of
-            # https://github.com/pytorch/pytorch/issues/1995
-            logits = batch["logits"][i].clone()
-            label = batch["labels"][i].clone()
-            pred_label = logits.argmax(dim=-1)
-
-            output_id = current_id + i
-
-            output = {
-                "pred_label": pred_label,
-                "label": label,
-            }
-
-            if self.save_path is not None:
-                # you can use safetensors or other lib here
-                torch.save(output, self.save_path / part / f"output_{output_id}.pth")
+        for met in metric_funcs:
+            if (
+                isinstance(met, TextMetricBase)
+                and not self.evaluation_dataloaders[part].dataset.has_ground_truth()
+            ):
+                continue
+            metrics.update_by_type(met.avg_type(), met.name, **met(**batch))
 
         return batch
 
@@ -172,24 +178,70 @@ class Inferencer(BaseTrainer):
 
         self.is_train = False
         self.model.eval()
+        has_ground_truth = dataloader.dataset.has_ground_truth()
 
         self.evaluation_metrics.reset()
 
-        # create Save dir
+        audio_ids = []
+        true_texts = []
+        all_predictions = {
+            str(decode_method): [] for decode_method in self.decode_methods
+        }
         if self.save_path is not None:
             (self.save_path / part).mkdir(exist_ok=True, parents=True)
 
-        with torch.no_grad():
-            for batch_idx, batch in tqdm(
-                enumerate(dataloader),
+        with torch.inference_mode():
+            for batch in tqdm(
+                dataloader,
                 desc=part,
                 total=len(dataloader),
             ):
                 batch = self.process_batch(
-                    batch_idx=batch_idx,
                     batch=batch,
                     part=part,
                     metrics=self.evaluation_metrics,
                 )
 
-        return self.evaluation_metrics.result()
+                for decode_method in self.decode_methods:
+                    predictions = batch[f"text_predicted_{str(decode_method)}"]
+                    all_predictions[str(decode_method)] += predictions
+
+                audio_ids += list(
+                    map(lambda audio_path: Path(audio_path).stem, batch["audio_path"])
+                )
+
+                if has_ground_truth:
+                    true_texts += batch["text"]
+
+                del batch
+                gc.collect()
+                if torch.device(self.device).type == "cuda":
+                    with torch.cuda.device(self.device):
+                        torch.cuda.empty_cache()
+
+        if self.save_path is not None:
+            save_path = self.save_path / part / "predictions.csv"
+
+            columns = {"id": audio_ids}
+            if has_ground_truth:
+                columns["true_text"] = true_texts
+            pd.DataFrame(columns | all_predictions).to_csv(save_path, index=False)
+            if self.final_decode_method is not None:
+                transcription_dir = self.save_path / part / "transcriptions"
+                transcription_dir.mkdir(parents=True, exist_ok=True)
+                for audio_id, text in zip(
+                    audio_ids,
+                    all_predictions[str(self.final_decode_method)],
+                    strict=True,
+                ):
+                    (transcription_dir / f"{audio_id}.txt").write_text(
+                        text, encoding="utf-8"
+                    )
+
+        logs = self.evaluation_metrics.result()
+        if not has_ground_truth:
+            for metric in self.metrics["inference"]:
+                if isinstance(metric, TextMetricBase):
+                    logs.pop(metric.name, None)
+            self.logger.info("%s: no reference transcriptions", part)
+        return logs

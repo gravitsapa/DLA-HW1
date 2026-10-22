@@ -1,0 +1,25 @@
+defaults:
+  - train
+  - override datasets: onebatchtest
+  - override transforms/instance_transforms: onebatch
+  - _self_
+
+experiment_name: ds2_ctc_onebatch
+dataloader:
+  batch_size: 2
+  num_workers: 0
+  pin_memory: true
+optimizer:
+  lr: 3e-4
+lr_scheduler:
+  max_lr: 6e-4
+  pct_start: 0.1
+  cycle_momentum: true
+trainer:
+  n_epochs: 30
+  epoch_len: 100
+  log_step: 10
+  max_grad_norm: 400.0
+  monitor: "min val_WER_(Greedy)"
+  save_period: 5
+  override: true

@@ -6,7 +6,7 @@ class BaseMetric(ABC):
     Base class for all metrics
     """
 
-    def __init__(self, name=None, *args, **kwargs):
+    def __init__(self, name=None, **kwargs):
         """
         Args:
             name (str | None): metric name to use in logger and writer.
@@ -27,3 +27,6 @@ class BaseMetric(ABC):
         returns the way to average this metric: mean/sum
         """
         raise NotImplementedError()
+
+    def inference_only(self) -> bool:
+        return False

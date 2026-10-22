@@ -70,17 +70,6 @@ class MetricTracker:
         else:
             raise ValueError(f"Unknown metric avg type: {avg_type}")
 
-    # def avg(self, key):
-    #     """
-    #     Return average value for a given metric.
-
-    #     Args:
-    #         key (str): metric name.
-    #     Returns:
-    #         average_value (float): average value for the metric.
-    #     """
-    #     return self._data.average[key]
-
     def result(self):
         """
         Return average value of each metric.
@@ -90,12 +79,3 @@ class MetricTracker:
                 for each metric name.
         """
         return dict(self._mean_data.average) | dict(self._sum_data["sum"])
-
-    # def keys(self):
-    #     """
-    #     Return all metric names defined in the MetricTracker.
-
-    #     Returns:
-    #         metric_keys (Index): all metric names in the table.
-    #     """
-    #     return self._data.average.keys()

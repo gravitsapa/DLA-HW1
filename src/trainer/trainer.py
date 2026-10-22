@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+from tqdm.auto import tqdm
 
 from src.logger.utils import plot_spectrogram
 from src.metrics.tracker import MetricTracker
@@ -14,7 +15,163 @@ class Trainer(BaseTrainer):
     Trainer class. Defines the logic of batch logging and processing.
     """
 
-    def process_batch(self, batch, metrics: MetricTracker):
+    def train(self):
+        """
+        Wrapper around training process to save model on keyboard interrupt.
+        """
+        try:
+            self._train_process()
+        except KeyboardInterrupt as e:
+            self.logger.info("Saving model on keyboard interrupt")
+            self._save_checkpoint(self._last_epoch, save_best=False)
+            raise e
+
+    def _train_process(self):
+        """
+        Full training logic:
+
+        Training model for an epoch, evaluating it on non-train partitions,
+        and monitoring the performance improvement (for early stopping
+        and saving the best checkpoint).
+        """
+        not_improved_count = 0
+        for epoch in range(self.start_epoch, self.epochs + 1):
+            self._last_epoch = epoch
+            result = self._train_epoch(epoch)
+
+            # save logged information into logs dict
+            logs = {"epoch": epoch}
+            logs.update(result)
+
+            # print logged information to the screen
+            for key, value in logs.items():
+                self.logger.info(f"    {key:15s}: {value}")
+
+            # evaluate model performance according to configured metric,
+            # save best checkpoint as model_best
+            best, stop_process, not_improved_count = self._monitor_performance(
+                logs, not_improved_count
+            )
+
+            if epoch % self.save_period == 0 or best:
+                self._save_checkpoint(epoch, save_best=best, only_best=True)
+
+            if stop_process:  # early_stop
+                break
+
+    def _train_epoch(self, epoch):
+        """
+        Training logic for an epoch, including logging and evaluation on
+        non-train partitions.
+
+        Args:
+            epoch (int): current training epoch.
+        Returns:
+            logs (dict): logs that contain the average loss and metric in
+                this epoch.
+        """
+        self.is_train = True
+        self.model.train()
+        if torch.device(self.device).type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
+        self.train_metrics.reset()
+        self.writer.set_step((epoch - 1) * self.epoch_len)
+        self.writer.add_scalar("epoch", epoch)
+        for batch_idx, batch in enumerate(
+            tqdm(self.train_dataloader, desc="train", total=self.epoch_len)
+        ):
+            try:
+                batch = self.process_batch(
+                    batch,
+                    metrics=self.train_metrics,
+                    now_is_eval=False,
+                )
+            except torch.cuda.OutOfMemoryError as e:
+                if self.skip_oom:
+                    self.logger.warning("OOM on batch. Skipping batch.")
+                    torch.cuda.empty_cache()  # free some memory
+                    continue
+                else:
+                    raise e
+
+            if batch["loss_is_correct"]:
+                self.train_metrics.update_mean("grad_norm", self._get_grad_norm())
+
+            # log current results
+            if batch_idx % self.log_step == 0:
+                self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
+                self.logger.debug(
+                    "Train Epoch: {} {} Loss: {:.6f}".format(
+                        epoch, self._progress(batch_idx), batch["loss"].item()
+                    )
+                )
+                self.writer.add_scalar(
+                    "learning rate", self.lr_scheduler.get_last_lr()[0]
+                )
+                self._log_scalars(self.train_metrics)
+                self._log_batch(batch_idx, batch)
+                # we don't want to reset train metrics at the start of every epoch
+                # because we are interested in recent train metrics
+                last_train_metrics = self.train_metrics.result()
+                self.train_metrics.reset()
+            if batch_idx + 1 >= self.epoch_len:
+                break
+
+        logs = last_train_metrics
+        self.writer.set_step(epoch * self.epoch_len)
+        logs.update(self._log_peak_gpu_memory())
+
+        # Run val/test
+        for part, dataloader in self.evaluation_dataloaders.items():
+            val_logs = self._evaluation_epoch(epoch, part, dataloader)
+            logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+
+        return logs
+
+    def _evaluation_epoch(self, epoch, part, dataloader):
+        """
+        Evaluate model on the partition after training for an epoch.
+
+        Args:
+            epoch (int): current training epoch.
+            part (str): partition to evaluate on
+            dataloader (DataLoader): dataloader for the partition.
+        Returns:
+            logs (dict): logs that contain the information about evaluation.
+        """
+        self.is_train = False
+        self.model.eval()
+        if torch.device(self.device).type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
+        self.evaluation_metrics.reset()
+        with torch.no_grad():
+            for batch_idx, batch in tqdm(
+                enumerate(dataloader),
+                desc=part,
+                total=len(dataloader),
+            ):
+                batch = self.process_batch(
+                    batch,
+                    metrics=self.evaluation_metrics,
+                    now_is_eval=True,
+                )
+            self.writer.set_step(epoch * self.epoch_len, part)
+            self._log_scalars(self.evaluation_metrics)
+            self._log_batch(
+                batch_idx, batch, part
+            )  # log only the last batch during inference
+
+        logs = self.evaluation_metrics.result()
+        self.writer.set_step(epoch * self.epoch_len, part)
+        logs.update(self._log_peak_gpu_memory())
+        return logs
+
+    def process_batch(
+        self,
+        batch: dict,
+        metrics: MetricTracker,
+        now_is_eval: bool,
+    ) -> dict:
         """
         Run batch through the model, compute metrics, compute loss,
         and do training step (during training stage).
@@ -43,6 +200,9 @@ class Trainer(BaseTrainer):
 
         outputs = self.model(**batch)
         batch.update(outputs)
+
+        if now_is_eval:
+            batch = self.decode_batch(batch)
 
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
@@ -77,79 +237,11 @@ class Trainer(BaseTrainer):
             mode (str): train or inference. Defines which logging
                 rules to apply.
         """
-        # method to log data from you batch
-        # such as audio, text or images, for example
+        index = torch.randint(len(batch["audio_path"]), ()).item()
+        self.log_spectrogram(index=index, **batch)
+        self.log_original_audio(index=index, **batch)
 
-        # logging scheme might be different for different partitions
         if mode == "train":  # the method is called only every self.log_step steps
-            self.log_spectrogram(**batch)
-            self.log_original_audio(**batch)
-            self.log_augmented_audio(**batch)
+            self.log_augmented_audio(index=index, **batch)
         else:
-            # Log Stuff
-            self.log_spectrogram(**batch)
             self.log_predictions(**batch)
-            self.log_original_audio(**batch)
-
-    def log_spectrogram(self, spectrogram, **batch):
-        spectrogram_for_plot = spectrogram[0].detach().cpu()
-        image = plot_spectrogram(spectrogram_for_plot)
-        self.writer.add_image("spectrogram", image)
-
-    def log_audio(self, audio, audio_length, sample_rate, audio_path, name):
-        index = 0
-        length = int(audio_length[index].item())
-        path = Path(audio_path[index]).name
-
-        waveform = audio[index, :length].detach().cpu()
-
-        self.writer.add_audio(
-            f"({name}){path}",
-            waveform,
-            sample_rate=sample_rate,
-        )
-
-    def log_original_audio(
-        self, original_audio, original_audio_length, sample_rate, audio_path, **batch
-    ):
-        self.log_audio(
-            original_audio, original_audio_length, sample_rate, audio_path, "original"
-        )
-
-    def log_augmented_audio(
-        self, audio, audio_length, sample_rate, audio_path, **batch
-    ):
-        self.log_audio(audio, audio_length, sample_rate, audio_path, "augmented")
-
-    def log_predictions(
-        self, text, log_probs, log_probs_length, audio_path, examples_to_log=10, **batch
-    ):
-        # TODO add beam search
-        # Note: by improving text encoder and metrics design
-        # this logging can also be improved significantly
-
-        argmax_inds = log_probs.cpu().argmax(-1).numpy()
-        argmax_inds = [
-            inds[: int(ind_len)]
-            for inds, ind_len in zip(argmax_inds, log_probs_length.numpy())
-        ]
-        argmax_texts_raw = [self.text_encoder.decode(inds) for inds in argmax_inds]
-        argmax_texts = [self.text_encoder.ctc_decode(inds) for inds in argmax_inds]
-        tuples = list(zip(argmax_texts, text, argmax_texts_raw, audio_path))
-
-        rows = {}
-        for pred, target, raw_pred, audio_path in tuples[:examples_to_log]:
-            target = self.text_encoder.normalize_text(target)
-            wer = calc_wer(target, pred) * 100
-            cer = calc_cer(target, pred) * 100
-
-            rows[Path(audio_path).name] = {
-                "target": target,
-                "raw prediction": raw_pred,
-                "predictions": pred,
-                "wer": wer,
-                "cer": cer,
-            }
-        self.writer.add_table(
-            "predictions", pd.DataFrame.from_dict(rows, orient="index")
-        )
