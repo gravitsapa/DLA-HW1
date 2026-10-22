@@ -35,7 +35,7 @@ python download_resources.py
 LibriSpeech скачивается автоматически при создании датасета.
 Для shallow fusion используется предобученная посимвольная LSTM-модель Flair `news-forward-fast`. Использование LM включается добавлением в конфиг метода `beam_search_lm`, обычные `greedy` и `beam_search` работают без LM.
 
-Обучение происходило 20 часов на NVIDIA RTX A6000 на LibriSpeech train-clean-360
+Обучение происходило 22 часа на NVIDIA RTX A6000 на LibriSpeech train-clean-360
 [Логи](https://www.comet.com/gravitsapa/dla-asr/gri7bl5uo6eafg7kio4dcuh2okg89079), [Отчет](https://www.comet.com/gravitsapa/dla-asr/reports/C0b2exn7oHVlwLuRNBCwvYXYA)
 
 Инференс на полных test-clean и test-other с greedy, beam search и beam search с LM:
