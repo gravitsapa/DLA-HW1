@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 
+import pandas as pd
 import torch
 from numpy import inf
 from torch.nn.utils import clip_grad_norm_
@@ -7,7 +9,9 @@ from tqdm.auto import tqdm
 
 from src.datasets.data_utils import inf_loop
 from src.decoding.base import DecodeMethod
+from src.logger.utils import plot_spectrogram
 from src.metrics.tracker import MetricTracker
+from src.metrics.utils import calc_cer, calc_wer
 from src.utils.io_utils import ROOT_PATH
 
 
@@ -432,3 +436,72 @@ class BaseTrainer(ABC):
             self.model.load_state_dict(checkpoint["state_dict"])
         else:
             self.model.load_state_dict(checkpoint)
+
+    def log_spectrogram(self, spectrogram, spectrogram_length, index, **batch):
+        length = int(spectrogram_length[index].item())
+        spectrogram_for_plot = spectrogram[index, :, :length].detach().cpu()
+        image = plot_spectrogram(spectrogram_for_plot)
+        self.writer.add_image("spectrogram", image)
+
+    def log_audio(self, audio, audio_length, sample_rate, audio_path, name, index):
+        length = int(audio_length[index].item())
+        path = Path(audio_path[index]).name
+
+        waveform = audio[index, :length].detach().cpu()
+
+        self.writer.add_audio(
+            f"({name}){path}",
+            waveform,
+            sample_rate=sample_rate,
+        )
+
+    def log_original_audio(
+        self,
+        original_audio,
+        original_audio_length,
+        sample_rate,
+        audio_path,
+        index,
+        **batch,
+    ):
+        self.log_audio(
+            original_audio,
+            original_audio_length,
+            sample_rate,
+            audio_path,
+            "original",
+            index=index,
+        )
+
+    def log_augmented_audio(
+        self, audio, audio_length, sample_rate, audio_path, index, **batch
+    ):
+        self.log_audio(
+            audio, audio_length, sample_rate, audio_path, "augmented", index=index
+        )
+
+    def log_predictions(self, text, audio_path, examples_to_log=10, **batch):
+        for decode_method in self.decode_methods:
+            if f"text_predicted_{str(decode_method)}" not in batch:
+                continue
+            texts_predicted = batch[f"text_predicted_{str(decode_method)}"]
+
+            tuples = list(zip(texts_predicted, text, audio_path))
+
+            rows = {}
+            for pred, target, path in tuples[:examples_to_log]:
+                target = self.text_encoder.normalize_text(target)
+                wer = calc_wer(target, pred) * 100
+                cer = calc_cer(target, pred) * 100
+
+                rows[Path(path).name] = {
+                    "step": self.writer.step,
+                    "method": str(decode_method),
+                    "target": target,
+                    "predictions": pred,
+                    "wer": wer,
+                    "cer": cer,
+                }
+            self.writer.add_table(
+                "predictions", pd.DataFrame.from_dict(rows, orient="index")
+            )
