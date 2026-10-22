@@ -1,0 +1,63 @@
+experiment_name: audio_augmentations_demo
+sample_rate: 16000
+n_samples: 20
+seed: 1
+
+comet:
+  project: dla-asr
+  workspace: gravitsapa
+
+dataset:
+  _target_: src.datasets.LibrispeechDataset
+  part: train-clean-100
+
+spectrogram:
+  _target_: src.transforms.spec_augs.log_mel.LogMelSpectrogram
+  sample_rate: ${sample_rate}
+  n_fft: 512
+  win_length: 400
+  hop_length: 160
+  n_mels: 80
+  f_min: 0.0
+  f_max: null
+  power: 2.0
+  center: true
+  mel_scale: htk
+  norm: null
+  eps: 1.0e-5
+
+augmentations:
+  Gain:
+    _target_: src.transforms.wav_augs.Gain
+    min_gain_in_db: -6.0
+    max_gain_in_db: 6.0
+    p: 1.0
+  SpeedPerturbation:
+    _target_: src.transforms.wav_augs.SpeedPerturbation
+    sample_rate: ${sample_rate}
+    factors: [0.9, 0.95, 1.05, 1.1]
+  AddReverb:
+    _target_: src.transforms.wav_augs.AddReverb
+    sample_rate: ${sample_rate}
+    room_size_min: 0.1
+    room_size_max: 0.5
+    damping_min: 0.3
+    damping_max: 0.7
+    wet_level_min: 0.05
+    wet_level_max: 0.2
+    dry_level_min: 0.8
+    dry_level_max: 1.0
+    width_min: 1.0
+    width_max: 1.0
+  AddColoredNoise:
+    _target_: src.transforms.wav_augs.AddColoredNoise
+    sample_rate: ${sample_rate}
+    min_snr_in_db: 30.0
+    max_snr_in_db: 40.0
+    min_f_decay: 0.0
+    max_f_decay: 1.0
+    p: 1.0
+
+hydra:
+  job:
+    chdir: false
