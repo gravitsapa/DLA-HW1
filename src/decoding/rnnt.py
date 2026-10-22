@@ -6,6 +6,7 @@ import torch
 from torch import Tensor
 
 from src.decoding.base import DecoderBase, log_add
+from src.decoding.lm import get_lm_states
 from src.model.head.rnnt_head import RNNTHead
 
 
@@ -245,15 +246,20 @@ class DecoderRNNT(DecoderBase):
                     )
                     if use_lm:
                         next_lm_states = {}
+                        missing = []
                         for prefix in retained:
                             if prefix in lm_states:
                                 next_lm_states[prefix] = lm_states[prefix]
                             elif prefix in completed_lm_states:
                                 next_lm_states[prefix] = completed_lm_states[prefix]
                             else:
-                                next_lm_states[prefix] = self.lm.step(
-                                    lm_states[prefix[:-1]][1], prefix[-1]
-                                )
+                                missing.append(prefix)
+                        states = get_lm_states(
+                            self.lm,
+                            [lm_states[prefix[:-1]][1] for prefix in missing],
+                            missing,
+                        )
+                        next_lm_states.update(zip(missing, states))
                         lm_states = next_lm_states
                     active = {
                         prefix: (candidates[prefix][0], prediction)

@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 from src.decoding.base import DecoderBase, log_add
-from src.decoding.lm import LM_STATE
+from src.decoding.lm import get_lm_states
 from src.model.head.linear_head import LinearHead
 
 
@@ -106,6 +106,7 @@ class DecoderCTC(DecoderBase):
 
                     if use_lm:
                         lm_probs, dynamic_cache = lm_states[prefix]
+                        lm_probs = lm_probs.tolist()
 
                     for token, token_prob in enumerate(frame):
                         if token == self.blank_id or token_prob == negative_inf:
@@ -142,10 +143,17 @@ class DecoderCTC(DecoderBase):
                     )[:beam_size]
                 )
                 if use_lm:
+                    missing = [prefix for prefix in beam if prefix not in lm_states]
+                    states = get_lm_states(
+                        self.lm, [new_states[prefix][0] for prefix in missing], missing
+                    )
+                    new_lm_states = dict(zip(missing, states))
                     lm_states = {
-                        prefix: lm_states[prefix]
-                        if prefix in lm_states
-                        else self.lm.step(*new_states[prefix])
+                        prefix: (
+                            lm_states[prefix]
+                            if prefix in lm_states
+                            else new_lm_states[prefix]
+                        )
                         for prefix in beam
                     }
 
